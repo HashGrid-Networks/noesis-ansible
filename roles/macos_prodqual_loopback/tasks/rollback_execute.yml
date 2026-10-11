@@ -1,0 +1,58 @@
+---
+# Gated rollback: restore known destinations only; bootout absent-safe.
+
+- name: Require rollback authorization
+  ansible.builtin.assert:
+    that:
+      - prodqual_apply_authorized | bool
+      - prodqual_rollback_authorized | default(false) | bool
+      - not (prodqual_offline_mode | bool)
+    fail_msg: "rollback execution is separately gated"
+
+- name: Require effective root for rollback
+  become: true
+  ansible.builtin.assert:
+    that:
+      - ansible_effective_user_id | int == 0
+    fail_msg: "rollback requires effective root/become"
+
+- name: Load backup manifest for rollback
+  ansible.builtin.slurp:
+    src: "{{ prodqual_backup_root }}/backup-manifest.json"
+  register: prodqual_rollback_manifest_slurp
+
+- name: Decode rollback backup manifest
+  ansible.builtin.set_fact:
+    prodqual_backup_result: "{{ prodqual_rollback_manifest_slurp.content | b64decode | from_json }}"
+
+- name: Execute rollback of known destinations
+  ansible.builtin.set_fact:
+    prodqual_rollback_result: "{{ prodqual_backup_result | prodqual_rollback(prodqual_rollback_staging_root, true, prodqual_unknown_live_paths | default([])) }}"
+
+- name: Halt on unknown destination or rollback errors
+  ansible.builtin.assert:
+    that:
+      - (prodqual_rollback_result.errors | default([]) | length) == 0
+    fail_msg: "{{ prodqual_rollback_result.errors | default([]) | join('; ') }}"
+
+- name: Read loaded labels before gated bootout
+  become: true
+  ansible.builtin.command:
+    argv:
+      - /bin/launchctl
+      - list
+  register: prodqual_rollback_launchctl
+  changed_when: false
+
+- name: Bootout managed labels (absent is safe)
+  become: true
+  ansible.builtin.command:
+    argv:
+      - /bin/launchctl
+      - bootout
+      - system
+      - "{{ item }}"
+  loop: "{{ prodqual_service_labels }}"
+  register: prodqual_bootout
+  failed_when: prodqual_bootout.rc | prodqual_bootout_failed_when(prodqual_bootout.stderr | default(''))
+  changed_when: prodqual_bootout.rc == 0

@@ -1,0 +1,4 @@
+---
+# Service lifecycle is implemented only in tasks/activate.yml
+# (idempotent bootstrap / absent-safe bootout). No notified handlers.
+[]

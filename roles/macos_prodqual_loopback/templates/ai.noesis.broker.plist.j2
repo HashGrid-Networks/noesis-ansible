@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.noesis.broker</string>
+  <key>UserName</key>
+  <string>{{ prodqual_authority_user }}</string>
+  <key>GroupName</key>
+  <string>{{ prodqual_authority_group }}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{ prodqual_broker_python }}</string>
+    <string>-m</string>
+    <string>uvicorn</string>
+    <string>{{ prodqual_broker_app }}</string>
+    <string>--host</string>
+    <string>{{ prodqual_broker_bind_host }}</string>
+    <string>--port</string>
+    <string>{{ prodqual_broker_bind_port }}</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HERMES_GOVERNED_PRODUCTION</key>
+    <string>1</string>
+    <key>HERMES_APPROVED_RELEASE_MANIFEST</key>
+    <string>{{ prodqual_manifest_path }}</string>
+    <key>HERMES_NOESIS_AUTHORITY_UID</key>
+    <string>{{ prodqual_authority_uid }}</string>
+    <key>HERMES_NOESIS_WORKER_UID</key>
+    <string>{{ prodqual_worker_uid }}</string>
+  </dict>
+  <key>WorkingDirectory</key>
+  <string>{{ prodqual_runtime_root }}</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>{{ prodqual_throttle_interval_seconds }}</integer>
+  <key>ExitTimeOut</key>
+  <integer>{{ prodqual_exit_timeout_seconds }}</integer>
+  <key>StandardOutPath</key>
+  <string>{{ prodqual_authority_log_root }}/broker.log</string>
+  <key>StandardErrorPath</key>
+  <string>{{ prodqual_authority_log_root }}/broker.error.log</string>
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>

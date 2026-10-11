@@ -1,0 +1,68 @@
+---
+# Separately gated activation. Must never run from the offline validation playbook.
+# Service lifecycle lives here; handlers are not used.
+
+- name: Refuse activation without dual authorization
+  ansible.builtin.assert:
+    that:
+      - prodqual_apply_authorized | bool
+      - prodqual_activation_authorized | bool
+      - not (prodqual_offline_mode | bool)
+      - not (ansible_check_mode | bool)
+    fail_msg: >-
+      activation is a separately approved phase and cannot run in
+      check-mode, offline validation, or without explicit authorization
+
+- name: Require effective root for launchd system domain
+  become: true
+  ansible.builtin.assert:
+    that:
+      - ansible_effective_user_id | int == 0
+    fail_msg: "system-domain launchctl requires effective root/become"
+
+- name: Bounded canary is a later external phase
+  ansible.builtin.assert:
+    that:
+      - not prodqual_canary_authorized | bool
+    fail_msg: "bounded canary is a later external phase; this role does not execute it"
+
+- name: Read loaded launchd labels before bootstrap
+  become: true
+  ansible.builtin.command:
+    argv:
+      - /bin/launchctl
+      - list
+  register: prodqual_activate_launchctl
+  changed_when: false
+
+- name: Compute loaded label set
+  ansible.builtin.set_fact:
+    prodqual_loaded_labels: "{{ prodqual_activate_launchctl.stdout | prodqual_parse_launchctl_list | map(attribute='label') | list }}"
+
+- name: Bootstrap authority launchd services when absent
+  become: true
+  ansible.builtin.command:
+    argv:
+      - /bin/launchctl
+      - bootstrap
+      - system
+      - "{{ prodqual_authority_launchd_dir }}/{{ item }}.plist"
+  loop:
+    - ai.noesis.broker
+    - ai.noesis.orchestrator
+    - ai.hermes.gateway
+  when: (prodqual_loaded_labels | prodqual_launchd_decision(item)) == 'bootstrap'
+  register: prodqual_authority_bootstrap
+  changed_when: prodqual_authority_bootstrap.rc | default(1) == 0
+
+- name: Bootstrap worker launchd service when absent
+  become: true
+  ansible.builtin.command:
+    argv:
+      - /bin/launchctl
+      - bootstrap
+      - system
+      - "{{ prodqual_worker_launchd_dir }}/ai.openclaw.gateway.plist"
+  when: (prodqual_loaded_labels | prodqual_launchd_decision('ai.openclaw.gateway')) == 'bootstrap'
+  register: prodqual_worker_bootstrap
+  changed_when: prodqual_worker_bootstrap.rc | default(1) == 0

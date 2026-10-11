@@ -1,0 +1,35 @@
+---
+# Offline validation only. Does not create users, change permissions,
+# install payload, load launchd, access credentials, or bind a physical host.
+#
+#   ansible-playbook -i inventory/prodqual_loopback_fixture/hosts.ini \
+#     playbooks/macos-prodqual-loopback-validate.yml --syntax-check
+#   ansible-playbook -i inventory/prodqual_loopback_fixture/hosts.ini \
+#     playbooks/macos-prodqual-loopback-validate.yml --check
+#
+# Structurally uses tasks_from: offline.yml so identity/filesystem/activate
+# and backup/restore/rollback execute files cannot run even if extra-vars
+# attempt to authorize apply.
+
+- name: Offline-validate macOS prodqual loopback target
+  hosts: prodqual_loopback
+  gather_facts: false
+  become: false
+  tags: [prodqual, offline, validate]
+  vars:
+    prodqual_offline_mode: true
+    prodqual_apply_authorized: false
+    prodqual_activation_authorized: false
+    prodqual_canary_authorized: false
+    prodqual_restore_authorized: false
+    prodqual_restore_live_authorized: false
+    prodqual_backup_authorized: false
+    prodqual_rollback_authorized: false
+  tasks:
+    - name: Include offline-only role tasks
+      ansible.builtin.include_role:
+        name: macos_prodqual_loopback
+        tasks_from: offline.yml
+        apply:
+          tags: [always]
+      tags: [always]

@@ -1,0 +1,14 @@
+---
+timeout_seconds: {{ prodqual_timeout_seconds }}
+exit_timeout_seconds: {{ prodqual_exit_timeout_seconds }}
+throttle_interval_seconds: {{ prodqual_throttle_interval_seconds }}
+max_parallel_jobs: {{ prodqual_max_parallel_jobs }}
+max_fanout: {{ prodqual_max_fanout }}
+max_cost_usd: "{{ prodqual_max_cost_usd }}"
+daily_supervisor_budget_usd: "{{ prodqual_daily_supervisor_budget_usd }}"
+daily_alert_usd: "{{ prodqual_daily_alert_usd }}"
+per_job_hard_limit_usd: "{{ prodqual_per_job_hard_limit_usd }}"
+block_reasoning_strong_without_approval: {{ prodqual_block_reasoning_strong_without_approval | bool | lower }}
+sandbox_mode: {{ prodqual_sandbox_mode | bool | lower }}
+approval_mode: {{ prodqual_approval_mode }}
+inference_spend_authorized: false

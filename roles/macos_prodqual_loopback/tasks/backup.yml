@@ -1,0 +1,16 @@
+---
+# Content-addressed backup plan render. Execution is backup_execute.yml.
+
+- name: Render backup plan manifest
+  ansible.builtin.template:
+    src: backup-manifest.json.j2
+    dest: "{{ prodqual_backup_plan_render_path | default(prodqual_backup_root ~ '/backup-plan.json') }}"
+    mode: "0600"
+  check_mode: true
+
+- name: Worker remains denied from backup authority
+  ansible.builtin.assert:
+    that:
+      - prodqual_backup_dir_mode == '0700'
+      - prodqual_runtime_owner == 'noesis-authority'
+    fail_msg: "backup root must remain authority-owned mode 0700"

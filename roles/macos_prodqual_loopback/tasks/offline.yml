@@ -1,0 +1,30 @@
+---
+# Structurally incapable of mutation. Not included: identity, filesystem,
+# activate, backup_execute, restore_execute, rollback_execute.
+# Templates are forced check_mode: true regardless of hostile extra-vars.
+- name: Include prodqual preflight
+  ansible.builtin.include_tasks:
+    file: preflight.yml
+    apply:
+      tags: [always]
+  tags: [always]
+
+- name: Include prodqual configure offline
+  ansible.builtin.include_tasks: configure_offline.yml
+  tags: [prodqual, configure, offline]
+
+- name: Include prodqual backup plan
+  ansible.builtin.include_tasks: backup.yml
+  tags: [prodqual, backup, offline]
+
+- name: Include prodqual restore plan
+  ansible.builtin.include_tasks: restore.yml
+  tags: [prodqual, restore, offline]
+
+- name: Include prodqual rollback plan
+  ansible.builtin.include_tasks: rollback.yml
+  tags: [prodqual, rollback, offline]
+
+- name: Include prodqual validate
+  ansible.builtin.include_tasks: validate.yml
+  tags: [prodqual, validate, offline]

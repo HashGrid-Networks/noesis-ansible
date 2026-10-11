@@ -1,0 +1,110 @@
+---
+- name: Refuse apply during offline validation
+  ansible.builtin.assert:
+    that:
+      - not (prodqual_apply_authorized | bool and prodqual_offline_mode | bool)
+    fail_msg: "prodqual_apply_authorized cannot be combined with prodqual_offline_mode"
+
+- name: Refuse in-role bounded canary (later external phase)
+  ansible.builtin.assert:
+    that:
+      - not (prodqual_canary_authorized | bool)
+    fail_msg: "bounded canary is a later external phase; this role does not execute it"
+
+- name: Refuse plaintext secret variables
+  ansible.builtin.assert:
+    that:
+      - vault_tailscale_auth_key is not defined
+      - hermes_broker_token is not defined
+      - HERMES_BROKER_TOKEN is not defined
+      - bws_access_token is not defined
+      - ansible_become_pass is not defined
+    fail_msg: "plaintext secret-bearing variables are forbidden in this target"
+
+- name: Include policy config (policy_phase static before UID discovery; full after)
+  ansible.builtin.include_tasks: policy_config.yml
+
+- name: Fail closed on target policy violations
+  ansible.builtin.assert:
+    that:
+      - (prodqual_config | prodqual_policy_errors | length) == 0
+    fail_msg: "{{ prodqual_config | prodqual_policy_errors | join('; ') }}"
+
+- name: Refuse stale launchd labels in this target
+  ansible.builtin.assert:
+    that:
+      - item not in prodqual_stale_labels_refused
+      - not (item | regex_search('^com\\.noesis\\.'))
+    fail_msg: "stale launchd label refused: {{ item }}"
+  loop: "{{ prodqual_service_labels }}"
+
+- name: Refuse non-loopback or Tailscale binds
+  ansible.builtin.assert:
+    that:
+      - prodqual_broker_bind_host in ['127.0.0.1', '::1']
+      - prodqual_openclaw_bind_host in ['127.0.0.1', '::1']
+      - not (prodqual_tailscale_bind_enabled | bool)
+      - not (prodqual_public_bind_enabled | bool)
+      - prodqual_hermes_gateway_bind_class == 'process_supervised_no_network_listener'
+    fail_msg: "this target is loopback-only; Tailscale and public binds are prohibited"
+
+- name: Live OS preflight (skipped offline)
+  when: not (prodqual_offline_mode | bool)
+  block:
+    - name: Require Darwin facts
+      ansible.builtin.assert:
+        that:
+          - ansible_os_family | default('') == 'Darwin'
+          - ansible_architecture | default('') == 'arm64' or ansible_machine | default('') == 'arm64'
+          - (ansible_distribution_version | default('0')).split('.')[0] == prodqual_os_major
+        fail_msg: >-
+          live host is not Darwin/macOS major {{ prodqual_os_major }} arm64
+          (os_family={{ ansible_os_family | default('unset') }},
+          arch={{ ansible_architecture | default('unset') }},
+          version={{ ansible_distribution_version | default('unset') }})
+
+    - name: Discover operator UniqueID (read-only)
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/id
+          - -u
+      register: prodqual_operator_id_pre
+      changed_when: false
+      check_mode: false
+
+    - name: Record operator UniqueID for live service comparison
+      ansible.builtin.set_fact:
+        prodqual_operator_uid: "{{ prodqual_operator_id_pre.stdout | trim }}"
+
+    - name: Inspect loaded launchd labels (read-only)
+      ansible.builtin.command:
+        argv:
+          - /bin/launchctl
+          - list
+      register: prodqual_launchctl_list
+      changed_when: false
+      check_mode: false
+
+    - name: Inspect process identities (read-only)
+      ansible.builtin.command:
+        argv:
+          - /bin/ps
+          - -axo
+          - uid=,pid=,command=
+      register: prodqual_ps_list
+      changed_when: false
+      check_mode: false
+
+    - name: Parse loaded labels
+      ansible.builtin.set_fact:
+        prodqual_loaded_services: "{{ prodqual_launchctl_list.stdout | prodqual_parse_launchctl_list }}"
+
+    - name: Map PIDs to UIDs
+      ansible.builtin.set_fact:
+        prodqual_process_uids: "{{ prodqual_loaded_services | prodqual_process_uids_from_ps(prodqual_ps_list.stdout) }}"
+
+    - name: Refuse stale, same-UID, conflicting, or unrecognized services
+      ansible.builtin.assert:
+        that:
+          - (prodqual_loaded_services | prodqual_live_service_errors(prodqual_service_labels, prodqual_operator_uid, prodqual_process_uids) | length) == 0
+        fail_msg: "{{ prodqual_loaded_services | prodqual_live_service_errors(prodqual_service_labels, prodqual_operator_uid, prodqual_process_uids) | join('; ') }}"

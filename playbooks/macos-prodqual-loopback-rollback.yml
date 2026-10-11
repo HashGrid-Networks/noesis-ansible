@@ -1,0 +1,19 @@
+---
+# Rollback entry point. Default play is offline-safe. Execution play is gated.
+
+- name: Import offline validation for rollback plan rendering
+  ansible.builtin.import_playbook: macos-prodqual-loopback-validate.yml
+
+- name: Gated rollback execution
+  hosts: prodqual_loopback
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Include rollback execution
+      ansible.builtin.include_role:
+        name: macos_prodqual_loopback
+        tasks_from: rollback_execute.yml
+      when:
+        - prodqual_apply_authorized | default(false) | bool
+        - prodqual_rollback_authorized | default(false) | bool
+        - not (prodqual_offline_mode | default(true) | bool)

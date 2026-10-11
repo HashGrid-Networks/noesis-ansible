@@ -1,0 +1,23 @@
+---
+# Restore is always staged first. Never mutates live destinations from offline mode.
+
+- name: Restore requires isolated staging
+  ansible.builtin.assert:
+    that:
+      - prodqual_rollback_staging_root | length > 0
+      - prodqual_rollback_staging_root != '/'
+      - prodqual_rollback_staging_root != '/Users'
+      - prodqual_rollback_staging_root != '/tmp'
+    fail_msg: "restore staging root is missing or unsafe"
+
+- name: Render restore procedure into backup root (offline check-only)
+  ansible.builtin.template:
+    src: restore-procedure.yml.j2
+    dest: "{{ prodqual_backup_root }}/restore-procedure.yml"
+    mode: "0600"
+  check_mode: true
+
+- name: Refuse live restore from unauthorized runs
+  ansible.builtin.debug:
+    msg: "restore execution is separately gated in restore_execute.yml"
+  when: not (prodqual_restore_authorized | bool)

@@ -1,0 +1,44 @@
+---
+schema_version: noesis.prodqual.rollback_plan/v1
+never_delete_unrecognized: true
+worker_denied: true
+phases:
+  - offline_validation
+  - install
+  - activation
+  - bounded_canary
+  - rollback
+classes:
+  payload:
+    source: "{{ prodqual_backup_root }}/payload/runtime"
+    destination: "{{ prodqual_runtime_root }}"
+    restore_via: isolated_staging
+    staging: "{{ prodqual_rollback_staging_root }}/runtime"
+  manifests:
+    source: "{{ prodqual_backup_root }}/payload/approved-release-manifest.json"
+    destination: "{{ prodqual_manifest_path }}"
+    restore_via: isolated_staging
+    staging: "{{ prodqual_rollback_staging_root }}/approved-release-manifest.json"
+  plists:
+    source: "{{ prodqual_backup_root }}/plists"
+    destination_authority: "{{ prodqual_authority_launchd_dir }}"
+    destination_worker: "{{ prodqual_worker_launchd_dir }}"
+    restore_via: isolated_staging
+    staging: "{{ prodqual_rollback_staging_root }}/plists"
+  ownership_modes_flags:
+    authority_user: "{{ prodqual_authority_user }}"
+    worker_user: "{{ prodqual_worker_user }}"
+    runtime_dir_mode: "{{ prodqual_runtime_dir_mode }}"
+    runtime_file_mode: "{{ prodqual_runtime_file_mode }}"
+    private_dir_mode: "{{ prodqual_taskstore_dir_mode }}"
+    private_file_mode: "{{ prodqual_taskstore_file_mode }}"
+    optional_uchg: "{{ prodqual_runtime_immutable | bool }}"
+  service_state:
+    labels: {{ prodqual_service_labels | to_nice_yaml | indent(6) }}
+    activation_tag: activate
+    cannot_run_from_offline_validation: true
+authorization:
+  apply: prodqual_apply_authorized
+  restore: prodqual_restore_authorized
+  activation: prodqual_activation_authorized
+  canary: prodqual_canary_authorized
