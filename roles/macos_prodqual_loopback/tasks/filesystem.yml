@@ -1,5 +1,6 @@
 ---
 # Later-approved filesystem boundary. Never run in offline validation.
+# Worker probes use Darwin python setuid, not Linux su with a shell flag.
 
 - name: Require apply authorization for filesystem mutation
   ansible.builtin.assert:
@@ -8,9 +9,18 @@
       - not (prodqual_offline_mode | bool)
       - prodqual_authority_uid | int > 0
       - prodqual_worker_uid | int > 0
+      - prodqual_worker_gid | int > 0
     fail_msg: "filesystem tasks are apply-gated and require discovered UIDs"
 
+- name: Require effective root for filesystem mutation
+  become: true
+  ansible.builtin.assert:
+    that:
+      - ansible_effective_user_id | int == 0
+    fail_msg: "filesystem mutation requires effective root/become"
+
 - name: Create authority-owned path classes
+  become: true
   ansible.builtin.file:
     path: "{{ item.path }}"
     state: directory
@@ -40,6 +50,7 @@
       mode: "{{ prodqual_backup_dir_mode }}"
 
 - name: Create worker-owned bounded path classes
+  become: true
   ansible.builtin.file:
     path: "{{ item.path }}"
     state: directory
@@ -55,16 +66,18 @@
       mode: "{{ prodqual_log_dir_mode }}"
 
 - name: Verify worker write is denied on authority paths
+  become: true
   ansible.builtin.command:
     argv:
-      - /usr/bin/su
-      - -s
-      - /bin/sh
-      - "{{ prodqual_worker_user }}"
+      - /usr/bin/python3
       - -c
-      - "touch '{{ item }}/.prodqual-worker-probe'"
+      - import os, sys; uid=int(sys.argv[1]); gid=int(sys.argv[2]); path=sys.argv[3]; os.setgid(gid); os.setuid(uid);
+        exec("try:\\n os.close(os.open(path, os.O_WRONLY|os.O_CREAT|os.O_EXCL, 0o600)); os.unlink(path); sys.exit(0)\\nexcept PermissionError:\\n sys.exit(13)\\nexcept OSError as exc:\\n sys.exit(13 if exc.errno in (1, 13) else 2)")
+      - "{{ prodqual_worker_uid | string }}"
+      - "{{ prodqual_worker_gid | string }}"
+      - "{{ item }}/.prodqual-worker-probe"
   register: prodqual_worker_denied
-  failed_when: prodqual_worker_denied.rc == 0
+  failed_when: (prodqual_worker_denied.rc | prodqual_interpret_worker_probe(True) | length) > 0
   changed_when: false
   loop:
     - "{{ prodqual_runtime_root }}"
@@ -75,18 +88,22 @@
     - "{{ prodqual_authority_profile_root }}"
     - "{{ prodqual_authority_credential_ref_root }}"
     - "{{ prodqual_authority_launchd_dir }}"
+    - "{{ prodqual_authority_log_root }}"
+    - "{{ prodqual_rollback_staging_root }}"
 
 - name: Verify worker write is permitted on bounded worker paths
+  become: true
   ansible.builtin.command:
     argv:
-      - /usr/bin/su
-      - -s
-      - /bin/sh
-      - "{{ prodqual_worker_user }}"
+      - /usr/bin/python3
       - -c
-      - "test -w '{{ item }}'"
+      - import os, sys; uid=int(sys.argv[1]); gid=int(sys.argv[2]); path=sys.argv[3]; os.setgid(gid); os.setuid(uid);
+        exec("try:\\n os.close(os.open(path, os.O_WRONLY|os.O_CREAT|os.O_EXCL, 0o600)); os.unlink(path); sys.exit(0)\\nexcept PermissionError:\\n sys.exit(13)\\nexcept OSError as exc:\\n sys.exit(13 if exc.errno in (1, 13) else 2)")
+      - "{{ prodqual_worker_uid | string }}"
+      - "{{ prodqual_worker_gid | string }}"
+      - "{{ item }}/.prodqual-worker-probe"
   register: prodqual_worker_allowed
-  failed_when: prodqual_worker_allowed.rc != 0
+  failed_when: (prodqual_worker_allowed.rc | prodqual_interpret_worker_probe(False) | length) > 0
   changed_when: false
   loop:
     - "{{ prodqual_worker_profile_root }}"

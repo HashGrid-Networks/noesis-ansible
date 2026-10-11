@@ -45,6 +45,17 @@
   check_mode: true
   when: prodqual_offline_mode | bool
 
+- name: Render authority resource caps (apply)
+  ansible.builtin.template:
+    src: resource-caps.yml.j2
+    dest: "{{ prodqual_caps_render_path }}"
+    owner: "{{ prodqual_authority_user }}"
+    group: "{{ prodqual_authority_group }}"
+    mode: "0600"
+  when:
+    - prodqual_apply_authorized | bool
+    - not (prodqual_offline_mode | bool)
+
 - name: Render path policy
   ansible.builtin.template:
     src: path-policy.yml.j2
@@ -52,6 +63,17 @@
     mode: "0600"
   check_mode: true
   when: prodqual_offline_mode | bool
+
+- name: Render path policy (apply)
+  ansible.builtin.template:
+    src: path-policy.yml.j2
+    dest: "{{ prodqual_path_policy_render_path }}"
+    owner: "{{ prodqual_authority_user }}"
+    group: "{{ prodqual_authority_group }}"
+    mode: "0600"
+  when:
+    - prodqual_apply_authorized | bool
+    - not (prodqual_offline_mode | bool)
 
 - name: Render authority launchd plists (offline check-only)
   ansible.builtin.template:

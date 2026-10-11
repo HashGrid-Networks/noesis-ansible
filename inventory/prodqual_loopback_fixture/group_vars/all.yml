@@ -9,10 +9,15 @@ prodqual_apply_authorized: false
 prodqual_activation_authorized: false
 prodqual_canary_authorized: false
 prodqual_restore_authorized: false
+prodqual_restore_live_authorized: false
+prodqual_backup_authorized: false
+prodqual_rollback_authorized: false
 prodqual_fixture_identities: true
+prodqual_uids_discovered: true
 
 prodqual_authority_uid: 901
 prodqual_worker_uid: 902
+prodqual_worker_gid: 902
 prodqual_operator_uid: 501
 prodqual_operator_user: operator-fixture
 
@@ -34,16 +39,18 @@ prodqual_authority_run_root: "{{ inventory_dir }}/staging/authority/run"
 prodqual_authority_launchd_dir: "{{ inventory_dir }}/staging/LaunchDaemons"
 prodqual_worker_launchd_dir: "{{ inventory_dir }}/staging/LaunchDaemons"
 prodqual_rollback_staging_root: "{{ inventory_dir }}/staging/authority/restore-staging"
-prodqual_hermes_gateway_socket: "{{ inventory_dir }}/staging/authority/run/hermes-gateway.sock"
+prodqual_hermes_gateway_bind_class: process_supervised_no_network_listener
+prodqual_hermes_gateway_socket: ""
 prodqual_broker_python: "{{ inventory_dir }}/staging/runtime/control-plane/python"
 prodqual_orchestrator_bin: "{{ inventory_dir }}/staging/runtime/control-plane/supervisor.py"
 prodqual_hermes_bin: "{{ inventory_dir }}/staging/runtime/bin/hermes"
 prodqual_openclaw_bin: "{{ inventory_dir }}/staging/runtime/bin/openclaw"
 
 prodqual_hardening_candidate_commit: "059c3b5bd80693205bd3e98dd916b650f98e82b8"
-prodqual_hardening_pin_status: unreviewed_pending_sentinel
+prodqual_hardening_pin_status: pass_with_comments_scoped_hardening_r2
 prodqual_runtime_payload_digest: "9450ccf6b4f84538e3b15053d9a2618011bd89c4e9a9aa0d287b41d88bd37425"
 prodqual_ansible_baseline_commit: "ffb1357d07ccdde0036c82acb47073b9d6770037"
+prodqual_package_parent_commit: "9059a277b753bd3d7bd83f0b4ab0dbd9b2b34c7e"
 prodqual_agent_stack_commit: "60ff6377684b09bd2a12816e7ae1e1624fe602a1"
 prodqual_lease_candidate_commit: ""
 prodqual_lease_candidate_status: pending_successor_review

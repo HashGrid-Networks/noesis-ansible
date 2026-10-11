@@ -5,7 +5,6 @@
     dest: "{{ prodqual_rollback_plan_render_path | default(prodqual_backup_root ~ '/rollback-plan.yml') }}"
     mode: "0600"
   check_mode: true
-  when: prodqual_offline_mode | bool
 
 - name: Assert rollback plan covers required classes
   ansible.builtin.assert:
@@ -29,4 +28,4 @@
     msg: >-
       rollback of live payload/manifests/plists/ownership/service state
       is not authorized in this run
-  when: not (prodqual_apply_authorized | bool)
+  when: not (prodqual_rollback_authorized | default(false) | bool)

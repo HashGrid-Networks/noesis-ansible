@@ -4,6 +4,9 @@
 # via inventory/prodqual_loopback_fixture/BINDING-CONTRACT.md.
 #
 # This playbook is not wired into site.yml or master-stack.yml.
+# Identity/filesystem/activation/backup/restore/rollback require explicit
+# extra-vars AND effective root (become). Offline validation uses a
+# structurally different tasks_from and cannot reach those files.
 
 - name: Prepare macOS prodqual loopback target (gated)
   hosts: prodqual_loopback
@@ -12,6 +15,7 @@
   tags: [prodqual]
   vars:
     prodqual_offline_mode: false
+    prodqual_privilege_required: true
   pre_tasks:
     - name: Refuse default apply
       ansible.builtin.assert:
@@ -21,10 +25,13 @@
           macos-prodqual-loopback.yml will not mutate a host unless
           -e prodqual_apply_authorized=true is explicitly supplied after
           independent review. Identity, filesystem, and activation remain
-          separately gated.
+          separately gated. System identity, LaunchDaemons, and launchctl
+          system domain require effective root.
+      tags: [always]
 
     - name: Gather facts only after apply authorization
       ansible.builtin.setup:
       when: prodqual_apply_authorized | bool
+      tags: [always]
   roles:
     - role: macos_prodqual_loopback

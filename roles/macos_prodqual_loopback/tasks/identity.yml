@@ -1,6 +1,7 @@
 ---
 # Later-approved identity creation. Never run in offline validation.
 # UniqueIDs are assigned by the OS; this role does not pin numeric UIDs.
+# Linux lock-password tokens are never set on Darwin user modules.
 
 - name: Require apply authorization for identity mutation
   ansible.builtin.assert:
@@ -9,19 +10,29 @@
       - not (prodqual_offline_mode | bool)
     fail_msg: "identity tasks are apply-gated and must not run offline"
 
+- name: Require effective root for identity mutation
+  ansible.builtin.assert:
+    that:
+      - ansible_effective_user_id | int == 0
+    fail_msg: "identity creation requires effective root/become"
+  become: true
+
 - name: Create authority group without pinned GID
+  become: true
   ansible.builtin.group:
     name: "{{ prodqual_authority_group }}"
     system: true
     state: present
 
 - name: Create worker group without pinned GID
+  become: true
   ansible.builtin.group:
     name: "{{ prodqual_worker_group }}"
     system: true
     state: present
 
 - name: Create unprivileged non-login authority user without pinned UID
+  become: true
   ansible.builtin.user:
     name: "{{ prodqual_authority_user }}"
     group: "{{ prodqual_authority_group }}"
@@ -29,10 +40,10 @@
     shell: "{{ prodqual_authority_shell }}"
     create_home: false
     system: true
-    password: "!"
     state: present
 
 - name: Create unprivileged non-login worker user without pinned UID
+  become: true
   ansible.builtin.user:
     name: "{{ prodqual_worker_user }}"
     group: "{{ prodqual_worker_group }}"
@@ -40,8 +51,55 @@
     shell: "{{ prodqual_worker_shell }}"
     create_home: false
     system: true
-    password: "!"
     state: present
+
+- name: Lock Darwin authority account (non-login)
+  become: true
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/dscl
+      - .
+      - -create
+      - "/Users/{{ prodqual_authority_user }}"
+      - Password
+      - "*"
+  changed_when: true
+
+- name: Disable Darwin authority AuthenticationAuthority
+  become: true
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/dscl
+      - .
+      - -create
+      - "/Users/{{ prodqual_authority_user }}"
+      - AuthenticationAuthority
+      - ";DisabledUser;"
+  changed_when: true
+
+- name: Lock Darwin worker account (non-login)
+  become: true
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/dscl
+      - .
+      - -create
+      - "/Users/{{ prodqual_worker_user }}"
+      - Password
+      - "*"
+  changed_when: true
+
+- name: Disable Darwin worker AuthenticationAuthority
+  become: true
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/dscl
+      - .
+      - -create
+      - "/Users/{{ prodqual_worker_user }}"
+      - AuthenticationAuthority
+      - ";DisabledUser;"
+  changed_when: true
 
 - name: Discover authority UniqueID
   ansible.builtin.command:
@@ -65,6 +123,17 @@
   register: prodqual_worker_dscl
   changed_when: false
 
+- name: Discover worker PrimaryGroupID
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/dscl
+      - .
+      - -read
+      - "/Groups/{{ prodqual_worker_group }}"
+      - PrimaryGroupID
+  register: prodqual_worker_gid_dscl
+  changed_when: false
+
 - name: Discover operator UniqueID
   ansible.builtin.command:
     argv:
@@ -77,18 +146,17 @@
   ansible.builtin.set_fact:
     prodqual_authority_uid: "{{ prodqual_authority_dscl.stdout | regex_replace('^UniqueID:\\s*', '') | trim }}"
     prodqual_worker_uid: "{{ prodqual_worker_dscl.stdout | regex_replace('^UniqueID:\\s*', '') | trim }}"
+    prodqual_worker_gid: "{{ prodqual_worker_gid_dscl.stdout | regex_replace('^PrimaryGroupID:\\s*', '') | trim }}"
     prodqual_operator_uid: "{{ prodqual_operator_id.stdout | trim }}"
+    prodqual_uids_discovered: true
 
-- name: Fail closed on equal or missing identities
+- name: Rebuild policy config with discovered identities
+  ansible.builtin.include_tasks: policy_config.yml
+
+- name: Re-run full identity/path/policy validation after discovery
   ansible.builtin.assert:
     that:
-      - prodqual_authority_uid | int != prodqual_worker_uid | int
-      - prodqual_authority_uid | int != prodqual_operator_uid | int
-      - prodqual_worker_uid | int != prodqual_operator_uid | int
-      - prodqual_authority_uid | int > 0
-      - prodqual_worker_uid | int > 0
-    fail_msg: >-
-      discovered UIDs are not distinct
-      (authority={{ prodqual_authority_uid }},
-      worker={{ prodqual_worker_uid }},
-      operator={{ prodqual_operator_uid }})
+      - prodqual_uids_discovered | bool
+      - prodqual_config.policy_phase == 'full'
+      - (prodqual_config | prodqual_policy_errors | length) == 0
+    fail_msg: "{{ prodqual_config | prodqual_policy_errors | join('; ') }}"

@@ -1,0 +1,40 @@
+---
+# Gated byte-copy backup. Never run from offline.yml.
+
+- name: Require backup authorization
+  ansible.builtin.assert:
+    that:
+      - prodqual_apply_authorized | bool
+      - prodqual_backup_authorized | default(false) | bool
+      - not (prodqual_offline_mode | bool)
+    fail_msg: "backup execution is separately gated"
+
+- name: Require effective root for backup authority paths
+  become: true
+  ansible.builtin.assert:
+    that:
+      - ansible_effective_user_id | int == 0
+    fail_msg: "backup copy requires effective root/become"
+
+- name: Build backup entry list from policy config
+  ansible.builtin.set_fact:
+    prodqual_backup_entries: "{{ prodqual_config | prodqual_build_backup_entries }}"
+
+- name: Copy payloads into content-addressed backup root
+  ansible.builtin.set_fact:
+    prodqual_backup_result: "{{ prodqual_backup_entries | prodqual_backup_copy(prodqual_backup_root, prodqual_recognized_checksums | default([]), prodqual_service_state | default([])) }}"
+
+- name: Halt on backup errors including unrecognized destination drift
+  ansible.builtin.assert:
+    that:
+      - (prodqual_backup_result.errors | default([]) | length) == 0
+    fail_msg: "{{ prodqual_backup_result.errors | default([]) | join('; ') }}"
+
+- name: Persist backup manifest with per-file hashes
+  become: true
+  ansible.builtin.copy:
+    dest: "{{ prodqual_backup_root }}/backup-manifest.json"
+    content: "{{ prodqual_backup_result | to_nice_json }}"
+    owner: "{{ prodqual_authority_user }}"
+    group: "{{ prodqual_authority_group }}"
+    mode: "0600"

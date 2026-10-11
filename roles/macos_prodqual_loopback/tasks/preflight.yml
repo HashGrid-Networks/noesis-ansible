@@ -5,6 +5,12 @@
       - not (prodqual_apply_authorized | bool and prodqual_offline_mode | bool)
     fail_msg: "prodqual_apply_authorized cannot be combined with prodqual_offline_mode"
 
+- name: Refuse in-role bounded canary (later external phase)
+  ansible.builtin.assert:
+    that:
+      - not (prodqual_canary_authorized | bool)
+    fail_msg: "bounded canary is a later external phase; this role does not execute it"
+
 - name: Refuse plaintext secret variables
   ansible.builtin.assert:
     that:
@@ -15,78 +21,8 @@
       - ansible_become_pass is not defined
     fail_msg: "plaintext secret-bearing variables are forbidden in this target"
 
-- name: Build fail-closed policy config
-  ansible.builtin.set_fact:
-    prodqual_config:
-      target_name: "{{ prodqual_target_name }}"
-      target_version: "{{ prodqual_target_version }}"
-      os_family: "{{ prodqual_os_family }}"
-      os_product: "{{ prodqual_os_product }}"
-      os_major: "{{ prodqual_os_major }}"
-      arch: "{{ prodqual_arch }}"
-      authority_user: "{{ prodqual_authority_user }}"
-      worker_user: "{{ prodqual_worker_user }}"
-      authority_group: "{{ prodqual_authority_group }}"
-      worker_group: "{{ prodqual_worker_group }}"
-      authority_uid: "{{ prodqual_authority_uid }}"
-      worker_uid: "{{ prodqual_worker_uid }}"
-      operator_uid: "{{ prodqual_operator_uid }}"
-      tailscale_bind_enabled: "{{ prodqual_tailscale_bind_enabled | bool }}"
-      public_bind_enabled: "{{ prodqual_public_bind_enabled | bool }}"
-      allowed_path_prefixes: "{{ prodqual_allowed_path_prefixes | default([prodqual_path_prefix, prodqual_authority_launchd_dir]) }}"
-      runtime_root: "{{ prodqual_runtime_root }}"
-      manifest_path: "{{ prodqual_manifest_path }}"
-      taskstore_root: "{{ prodqual_taskstore_root }}"
-      approval_store: "{{ prodqual_approval_store }}"
-      backup_root: "{{ prodqual_backup_root }}"
-      authority_profile_root: "{{ prodqual_authority_profile_root }}"
-      worker_profile_root: "{{ prodqual_worker_profile_root }}"
-      worker_scratch_root: "{{ prodqual_worker_scratch_root }}"
-      authority_credential_ref_root: "{{ prodqual_authority_credential_ref_root }}"
-      authority_log_root: "{{ prodqual_authority_log_root }}"
-      worker_log_root: "{{ prodqual_worker_log_root }}"
-      authority_run_root: "{{ prodqual_authority_run_root }}"
-      authority_launchd_dir: "{{ prodqual_authority_launchd_dir }}"
-      worker_launchd_dir: "{{ prodqual_worker_launchd_dir }}"
-      rollback_staging_root: "{{ prodqual_rollback_staging_root }}"
-      taskstore_dir_mode: "{{ prodqual_taskstore_dir_mode }}"
-      taskstore_file_mode: "{{ prodqual_taskstore_file_mode }}"
-      approval_dir_mode: "{{ prodqual_approval_dir_mode }}"
-      approval_file_mode: "{{ prodqual_approval_file_mode }}"
-      backup_dir_mode: "{{ prodqual_backup_dir_mode }}"
-      credential_ref_dir_mode: "{{ prodqual_credential_ref_dir_mode }}"
-      authority_profile_dir_mode: "{{ prodqual_authority_profile_dir_mode }}"
-      worker_profile_dir_mode: "{{ prodqual_worker_profile_dir_mode }}"
-      runtime_dir_mode: "{{ prodqual_runtime_dir_mode }}"
-      runtime_file_mode: "{{ prodqual_runtime_file_mode }}"
-      runtime_owner: "{{ prodqual_runtime_owner }}"
-      manifest_owner: "{{ prodqual_manifest_owner }}"
-      worker_profile_owner: "{{ prodqual_worker_profile_owner }}"
-      binds:
-        broker:
-          host: "{{ prodqual_broker_bind_host }}"
-          port: "{{ prodqual_broker_bind_port }}"
-        openclaw:
-          host: "{{ prodqual_openclaw_bind_host }}"
-          port: "{{ prodqual_openclaw_bind_port }}"
-      service_labels: "{{ prodqual_service_labels }}"
-      governed_env_keys: "{{ prodqual_governed_env_keys }}"
-      runtime_payload_recipe_version: "{{ prodqual_runtime_payload_recipe_version }}"
-      manifest_schema_version: "{{ prodqual_manifest_schema_version }}"
-      runtime_files: "{{ prodqual_runtime_files }}"
-      runtime_payload_digest: "{{ prodqual_runtime_payload_digest }}"
-      hardening_candidate_commit: "{{ prodqual_hardening_candidate_commit }}"
-      ansible_baseline_commit: "{{ prodqual_ansible_baseline_commit }}"
-      agent_stack_commit: "{{ prodqual_agent_stack_commit }}"
-      lease_candidate_commit: "{{ prodqual_lease_candidate_commit }}"
-      lease_candidate_status: "{{ prodqual_lease_candidate_status }}"
-      timeout_seconds: "{{ prodqual_timeout_seconds }}"
-      exit_timeout_seconds: "{{ prodqual_exit_timeout_seconds }}"
-      throttle_interval_seconds: "{{ prodqual_throttle_interval_seconds }}"
-      max_parallel_jobs: "{{ prodqual_max_parallel_jobs }}"
-      max_fanout: "{{ prodqual_max_fanout }}"
-      apply_authorized: "{{ prodqual_apply_authorized | bool }}"
-      offline_mode: "{{ prodqual_offline_mode | bool }}"
+- name: Include policy config (policy_phase static before UID discovery; full after)
+  ansible.builtin.include_tasks: policy_config.yml
 
 - name: Fail closed on target policy violations
   ansible.builtin.assert:
@@ -109,7 +45,7 @@
       - prodqual_openclaw_bind_host in ['127.0.0.1', '::1']
       - not (prodqual_tailscale_bind_enabled | bool)
       - not (prodqual_public_bind_enabled | bool)
-      - prodqual_hermes_gateway_bind_class == 'unix_socket'
+      - prodqual_hermes_gateway_bind_class == 'process_supervised_no_network_listener'
     fail_msg: "this target is loopback-only; Tailscale and public binds are prohibited"
 
 - name: Live OS preflight (skipped offline)
@@ -126,3 +62,49 @@
           (os_family={{ ansible_os_family | default('unset') }},
           arch={{ ansible_architecture | default('unset') }},
           version={{ ansible_distribution_version | default('unset') }})
+
+    - name: Discover operator UniqueID (read-only)
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/id
+          - -u
+      register: prodqual_operator_id_pre
+      changed_when: false
+      check_mode: false
+
+    - name: Record operator UniqueID for live service comparison
+      ansible.builtin.set_fact:
+        prodqual_operator_uid: "{{ prodqual_operator_id_pre.stdout | trim }}"
+
+    - name: Inspect loaded launchd labels (read-only)
+      ansible.builtin.command:
+        argv:
+          - /bin/launchctl
+          - list
+      register: prodqual_launchctl_list
+      changed_when: false
+      check_mode: false
+
+    - name: Inspect process identities (read-only)
+      ansible.builtin.command:
+        argv:
+          - /bin/ps
+          - -axo
+          - uid=,pid=,command=
+      register: prodqual_ps_list
+      changed_when: false
+      check_mode: false
+
+    - name: Parse loaded labels
+      ansible.builtin.set_fact:
+        prodqual_loaded_services: "{{ prodqual_launchctl_list.stdout | prodqual_parse_launchctl_list }}"
+
+    - name: Map PIDs to UIDs
+      ansible.builtin.set_fact:
+        prodqual_process_uids: "{{ prodqual_loaded_services | prodqual_process_uids_from_ps(prodqual_ps_list.stdout) }}"
+
+    - name: Refuse stale, same-UID, conflicting, or unrecognized services
+      ansible.builtin.assert:
+        that:
+          - (prodqual_loaded_services | prodqual_live_service_errors(prodqual_service_labels, prodqual_operator_uid, prodqual_process_uids) | length) == 0
+        fail_msg: "{{ prodqual_loaded_services | prodqual_live_service_errors(prodqual_service_labels, prodqual_operator_uid, prodqual_process_uids) | join('; ') }}"

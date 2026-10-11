@@ -17,12 +17,16 @@
       - prodqual_runtime_payload_recipe_version == 'hardening-1-trusted-manifest-runtime/v1'
     fail_msg: "HARDENING runtime recipe/digest mismatch"
 
-- name: Validate hermes gateway has no TCP public bind
+- name: Validate hermes gateway process-supervised interface
   ansible.builtin.assert:
     that:
-      - prodqual_hermes_gateway_bind_class == 'unix_socket'
-      - prodqual_hermes_gateway_socket[0] == '/'
-    fail_msg: "hermes gateway must use an absolute unix socket for this target"
+      - prodqual_hermes_gateway_bind_class == 'process_supervised_no_network_listener'
+      - (prodqual_hermes_gateway_socket | default('')) | length == 0
+      - (prodqual_hermes_gateway_argv | default(['gateway', 'run', '--external-supervisor'])) == ['gateway', 'run', '--external-supervisor']
+    fail_msg: >-
+      hermes gateway has no supported CLI unix-socket or bind-address flag;
+      ProgramArguments must be gateway run --external-supervisor and must not
+      claim a listener this CLI cannot configure
 
 - name: Record that UserName is insufficient boundary evidence
   ansible.builtin.debug:

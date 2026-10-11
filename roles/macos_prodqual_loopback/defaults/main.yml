@@ -13,8 +13,13 @@ prodqual_arch: arm64
 prodqual_apply_authorized: false
 prodqual_offline_mode: false
 prodqual_restore_authorized: false
+prodqual_restore_live_authorized: false
+prodqual_backup_authorized: false
+prodqual_rollback_authorized: false
 prodqual_activation_authorized: false
 prodqual_canary_authorized: false
+prodqual_privilege_required: true
+prodqual_uids_discovered: false
 prodqual_tailscale_bind_enabled: false
 prodqual_public_bind_enabled: false
 prodqual_palace_enabled: false
@@ -28,6 +33,7 @@ prodqual_authority_shell: /usr/bin/false
 prodqual_worker_shell: /usr/bin/false
 prodqual_authority_uid: null
 prodqual_worker_uid: null
+prodqual_worker_gid: null
 prodqual_operator_uid: null
 prodqual_operator_user: null
 
@@ -71,8 +77,15 @@ prodqual_broker_bind_host: "127.0.0.1"
 prodqual_broker_bind_port: 8787
 prodqual_openclaw_bind_host: "127.0.0.1"
 prodqual_openclaw_bind_port: 18789
-prodqual_hermes_gateway_bind_class: unix_socket
-prodqual_hermes_gateway_socket: /opt/noesis/prodqual/authority/run/hermes-gateway.sock
+# Frozen Hermes CLI (`gateway run`) has no unix-socket or bind-address flag.
+# Trust boundary: launchd UserName/GroupName, WorkingDirectory, no Sockets
+# dictionary, and --external-supervisor under an external process manager.
+prodqual_hermes_gateway_bind_class: process_supervised_no_network_listener
+prodqual_hermes_gateway_socket: ""
+prodqual_hermes_gateway_argv:
+  - gateway
+  - run
+  - --external-supervisor
 
 prodqual_broker_python: /opt/noesis/prodqual/runtime/control-plane/python
 prodqual_broker_app: app.main:app
@@ -114,7 +127,8 @@ prodqual_manifest_schema_version: noesis.approved_release_manifest/v1
 prodqual_candidate_id: prodqual-hermes-hardening-trusted-manifest/v1
 prodqual_runtime_payload_recipe_version: hardening-1-trusted-manifest-runtime/v1
 prodqual_hardening_candidate_commit: ""
-prodqual_hardening_pin_status: unreviewed_pending_sentinel
+prodqual_hardening_pin_status: pass_with_comments_scoped_hardening_r2
+prodqual_package_parent_commit: "9059a277b753bd3d7bd83f0b4ab0dbd9b2b34c7e"
 prodqual_runtime_payload_digest: ""
 prodqual_ansible_baseline_commit: ""
 prodqual_agent_stack_commit: ""

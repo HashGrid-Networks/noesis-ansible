@@ -7,7 +7,9 @@
 #   ansible-playbook -i inventory/prodqual_loopback_fixture/hosts.ini \
 #     playbooks/macos-prodqual-loopback-validate.yml --check
 #
-# Do not pass --tags activate or identity. This playbook does not import those phases.
+# Structurally uses tasks_from: offline.yml so identity/filesystem/activate
+# and backup/restore/rollback execute files cannot run even if extra-vars
+# attempt to authorize apply.
 
 - name: Offline-validate macOS prodqual loopback target
   hosts: prodqual_loopback
@@ -20,6 +22,14 @@
     prodqual_activation_authorized: false
     prodqual_canary_authorized: false
     prodqual_restore_authorized: false
-  roles:
-    - role: macos_prodqual_loopback
-      tags: [prodqual, offline, validate]
+    prodqual_restore_live_authorized: false
+    prodqual_backup_authorized: false
+    prodqual_rollback_authorized: false
+  tasks:
+    - name: Include offline-only role tasks
+      ansible.builtin.include_role:
+        name: macos_prodqual_loopback
+        tasks_from: offline.yml
+        apply:
+          tags: [always]
+      tags: [always]

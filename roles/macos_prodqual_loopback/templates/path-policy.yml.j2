@@ -11,6 +11,8 @@ worker_write_denied:
   - {{ prodqual_authority_profile_root }}
   - {{ prodqual_authority_credential_ref_root }}
   - {{ prodqual_authority_launchd_dir }}
+  - {{ prodqual_authority_log_root }}
+  - {{ prodqual_rollback_staging_root }}
 worker_write_permitted:
   - {{ prodqual_worker_profile_root }}
   - {{ prodqual_worker_scratch_root }}

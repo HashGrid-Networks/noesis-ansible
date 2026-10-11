@@ -1,0 +1,47 @@
+---
+# Gated staged restore then optional live write.
+
+- name: Require restore authorization
+  ansible.builtin.assert:
+    that:
+      - prodqual_apply_authorized | bool
+      - prodqual_restore_authorized | bool
+      - not (prodqual_offline_mode | bool)
+    fail_msg: "restore execution is separately gated"
+
+- name: Require effective root for restore authority paths
+  become: true
+  ansible.builtin.assert:
+    that:
+      - ansible_effective_user_id | int == 0
+    fail_msg: "restore requires effective root/become"
+
+- name: Load backup manifest
+  ansible.builtin.slurp:
+    src: "{{ prodqual_backup_root }}/backup-manifest.json"
+  register: prodqual_backup_manifest_slurp
+
+- name: Decode backup manifest
+  ansible.builtin.set_fact:
+    prodqual_backup_result: "{{ prodqual_backup_manifest_slurp.content | b64decode | from_json }}"
+
+- name: Restore into isolated staging and verify hashes
+  ansible.builtin.set_fact:
+    prodqual_stage_result: "{{ prodqual_backup_result | prodqual_stage_restore(prodqual_rollback_staging_root) }}"
+
+- name: Halt on staged hash mismatch
+  ansible.builtin.assert:
+    that:
+      - (prodqual_stage_result.errors | default([]) | length) == 0
+    fail_msg: "{{ prodqual_stage_result.errors | default([]) | join('; ') }}"
+
+- name: Live restore writes require separate authorization
+  ansible.builtin.set_fact:
+    prodqual_live_restore_result: "{{ prodqual_backup_result | prodqual_live_restore(prodqual_rollback_staging_root, true, prodqual_restore_live_authorized | default(false) | bool) }}"
+
+- name: Halt unless live restore is authorized or remains staged-only
+  ansible.builtin.assert:
+    that:
+      - (prodqual_restore_live_authorized | default(false) | bool) or ('live' in (prodqual_live_restore_result.errors | default(['live']) | join(' ')))
+      - not (prodqual_restore_live_authorized | default(false) | bool) or ((prodqual_live_restore_result.errors | default([]) | length) == 0)
+    fail_msg: "{{ prodqual_live_restore_result.errors | default([]) | join('; ') }}"

@@ -3,8 +3,10 @@ from __future__ import absolute_import, division, print_function
 
 __metaclass__ = type
 
+import hashlib
 import os
 import re
+import shutil
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -52,6 +54,8 @@ SECRET_KEY_RE = re.compile(
     re.IGNORECASE,
 )
 DEFAULT_ALLOWED_PREFIXES = ("/opt/noesis/prodqual",)
+HERMES_GATEWAY_BIND_CLASS = "process_supervised_no_network_listener"
+HERMES_GATEWAY_ARGV = ("gateway", "run", "--external-supervisor")
 
 
 def _truthy(value):
@@ -150,6 +154,10 @@ def _secret_field_errors(mapping, prefix=""):
         "_var",
         "_ref",
         "_refs",
+        "_socket",
+        "_class",
+        "_note",
+        "_interface",
     )
     for key, value in mapping.items():
         path = "%s.%s" % (prefix, key) if prefix else str(key)
@@ -166,8 +174,33 @@ def _secret_field_errors(mapping, prefix=""):
     return found
 
 
-def prodqual_policy_errors(config):
-    """Return a list of fail-closed violations for a target config dict."""
+def prodqual_identity_policy_errors(config):
+    """UID/GID distinctness. Live apply runs this only after discovery."""
+    errors = []
+    if not isinstance(config, dict):
+        return ["prodqual config must be a mapping"]
+    authority_uid = _as_int(config.get("authority_uid"), "authority_uid", errors)
+    worker_uid = _as_int(config.get("worker_uid"), "worker_uid", errors)
+    operator_uid = _as_int(config.get("operator_uid"), "operator_uid", errors)
+    if None not in (authority_uid, worker_uid, operator_uid):
+        if authority_uid == worker_uid:
+            errors.append("authority_uid must be distinct from worker_uid")
+        if authority_uid == operator_uid:
+            errors.append("authority_uid must be distinct from operator_uid")
+        if worker_uid == operator_uid:
+            errors.append("worker_uid must be distinct from operator_uid")
+        for name, uid in (
+            ("authority_uid", authority_uid),
+            ("worker_uid", worker_uid),
+            ("operator_uid", operator_uid),
+        ):
+            if uid is not None and uid < 1:
+                errors.append("%s must be a positive UniqueID" % name)
+    return errors
+
+
+def prodqual_static_policy_errors(config):
+    """Static target/policy inputs that do not require discovered UIDs."""
     errors = []
     if not isinstance(config, dict):
         return ["prodqual config must be a mapping"]
@@ -193,24 +226,6 @@ def prodqual_policy_errors(config):
         errors.append("authority_group must be noesis-authority")
     if config.get("worker_group") != "noesis-worker":
         errors.append("worker_group must be noesis-worker")
-
-    authority_uid = _as_int(config.get("authority_uid"), "authority_uid", errors)
-    worker_uid = _as_int(config.get("worker_uid"), "worker_uid", errors)
-    operator_uid = _as_int(config.get("operator_uid"), "operator_uid", errors)
-    if None not in (authority_uid, worker_uid, operator_uid):
-        if authority_uid == worker_uid:
-            errors.append("authority_uid must be distinct from worker_uid")
-        if authority_uid == operator_uid:
-            errors.append("authority_uid must be distinct from operator_uid")
-        if worker_uid == operator_uid:
-            errors.append("worker_uid must be distinct from operator_uid")
-        for name, uid in (
-            ("authority_uid", authority_uid),
-            ("worker_uid", worker_uid),
-            ("operator_uid", operator_uid),
-        ):
-            if uid is not None and uid < 1:
-                errors.append("%s must be a positive UniqueID" % name)
 
     if _truthy(config.get("tailscale_bind_enabled")):
         errors.append("tailscale bind is prohibited for this target")
@@ -310,6 +325,22 @@ def prodqual_policy_errors(config):
             except (TypeError, ValueError):
                 errors.append("bind %s port must be an integer" % name)
 
+    bind_class = config.get("hermes_gateway_bind_class")
+    if bind_class not in (None, ""):
+        if bind_class == "unix_socket":
+            errors.append(
+                "hermes_gateway_bind_class unix_socket is not a supported Hermes CLI listener"
+            )
+        elif bind_class != HERMES_GATEWAY_BIND_CLASS:
+            errors.append(
+                "hermes_gateway_bind_class must be %s" % HERMES_GATEWAY_BIND_CLASS
+            )
+    socket = config.get("hermes_gateway_socket")
+    if socket not in (None, ""):
+        errors.append(
+            "hermes_gateway_socket is not a supported/consumed Hermes CLI bind; remove unused socket claim"
+        )
+
     labels = list(config.get("service_labels") or [])
     for stale in STALE_LABELS:
         if stale in labels:
@@ -384,8 +415,432 @@ def prodqual_policy_errors(config):
     return errors
 
 
+def prodqual_policy_errors(config):
+    """Return a list of fail-closed violations for a target config dict."""
+    if not isinstance(config, dict):
+        return ["prodqual config must be a mapping"]
+    errors = prodqual_static_policy_errors(config)
+    phase = config.get("policy_phase") or "full"
+    if phase != "static":
+        errors.extend(prodqual_identity_policy_errors(config))
+    return errors
+
+
+def prodqual_hermes_gateway_argv(*_args, **_kwargs):
+    return list(HERMES_GATEWAY_ARGV)
+
+
+def prodqual_interpret_worker_probe(rc, expect_denied=True, stderr=""):
+    """Fail-closed interpretation of Darwin setuid write probes."""
+    try:
+        code = int(rc)
+    except (TypeError, ValueError):
+        return ["worker probe rc is not an integer: %r" % rc]
+    if expect_denied:
+        if code == 13:
+            return []
+        return [
+            "worker denial probe failed rc=%s (need EACCES=13; 0=write succeeded; other=parser/command failure)"
+            % code
+        ]
+    if code == 0:
+        return []
+    return ["worker allow probe failed rc=%s" % code]
+
+
+def prodqual_parse_launchctl_list(stdout):
+    loaded = []
+    for line in str(stdout or "").splitlines():
+        text = line.strip()
+        if not text or text.lower().startswith("pid"):
+            continue
+        parts = text.split()
+        if len(parts) < 3:
+            continue
+        pid_text, status, label = parts[0], parts[1], parts[2]
+        pid = None if pid_text == "-" else (int(pid_text) if pid_text.isdigit() else pid_text)
+        loaded.append({"pid": pid, "status": status, "label": label})
+    return loaded
+
+
+def prodqual_live_service_errors(loaded, expected_labels=None, operator_uid=None, process_uids=None):
+    errors = []
+    expected = set(expected_labels or REQUIRED_LABELS)
+    process_uids = process_uids or {}
+    for item in loaded or []:
+        label = str(item.get("label") or "")
+        if label.startswith("com.apple.") or label.startswith("com.openssh."):
+            continue
+        if label.startswith("com.noesis."):
+            errors.append("stale launchd label refused: %s" % label)
+        uid = process_uids.get(label)
+        if (
+            uid is not None
+            and operator_uid not in (None, "")
+            and int(uid) == int(operator_uid)
+            and (
+                label.startswith("ai.noesis.")
+                or label.startswith("ai.hermes.")
+                or label.startswith("ai.openclaw.")
+                or "prototype" in label
+            )
+        ):
+            errors.append("same-UID prototype unit refused: %s uid=%s" % (label, uid))
+        if (
+            label.startswith("ai.noesis.")
+            or label.startswith("ai.hermes.")
+            or label.startswith("ai.openclaw.")
+        ) and label not in expected:
+            errors.append("conflicting or unrecognized service label: %s" % label)
+    return errors
+
+
+def prodqual_process_uids_from_ps(loaded, ps_stdout):
+    pid_to_uid = {}
+    for line in str(ps_stdout or "").splitlines():
+        parts = line.split(None, 2)
+        if len(parts) < 2:
+            continue
+        if str(parts[0]).isdigit() and str(parts[1]).isdigit():
+            pid_to_uid[int(parts[1])] = int(parts[0])
+    mapping = {}
+    for item in loaded or []:
+        pid = item.get("pid")
+        if pid in (None, "-", ""):
+            continue
+        try:
+            pid_i = int(pid)
+        except (TypeError, ValueError):
+            continue
+        if pid_i in pid_to_uid:
+            mapping[item["label"]] = pid_to_uid[pid_i]
+    return mapping
+
+
+def prodqual_launchd_decision(loaded_labels, label):
+    if label in (loaded_labels or []):
+        return "skip"
+    return "bootstrap"
+
+
+def prodqual_bootout_failed_when(rc, stderr=""):
+    try:
+        code = int(rc)
+    except (TypeError, ValueError):
+        return True
+    if code == 0:
+        return False
+    text = stderr or ""
+    if code in (3, 113) or "Could not find specified service" in text or "No such process" in text:
+        return False
+    return True
+
+
+def _file_sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _copy_into(src, dest):
+    parent = os.path.dirname(dest)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    with open(src, "rb") as inf, open(dest, "wb") as out:
+        shutil.copyfileobj(inf, out)
+
+
+def prodqual_backup_copy(entries, backup_root, recognized_checksums=None, service_state=None):
+    """Copy exact file payloads into a content-addressed backup root."""
+    errors = []
+    recorded = []
+    recognized_checksums = list(recognized_checksums or [])
+    os.makedirs(backup_root, exist_ok=True)
+    objects = os.path.join(backup_root, "objects")
+    os.makedirs(objects, exist_ok=True)
+
+    def remember_file(entry, source, relpath, live_path, class_name):
+        sha = _file_sha256(source)
+        object_path = os.path.join(objects, sha)
+        if not os.path.isfile(object_path):
+            _copy_into(source, object_path)
+        dest_path = os.path.join(backup_root, relpath)
+        _copy_into(source, dest_path)
+        rec = dict(entry)
+        rec["class"] = class_name
+        rec["kind"] = "file"
+        rec["source_path"] = source
+        rec["source_sha256"] = sha
+        rec["backup_path"] = dest_path
+        rec["object_path"] = object_path
+        rec["relpath"] = relpath
+        rec["live_path"] = live_path
+        recorded.append(rec)
+
+    for entry in entries or []:
+        kind = entry.get("kind")
+        live = entry.get("live_path")
+        source = entry.get("source_path")
+        if kind == "directory":
+            files = entry.get("files")
+            if not files:
+                errors.append(
+                    "directory destination requires explicit file manifest: %s" % live
+                )
+                continue
+            if live and os.path.isdir(live):
+                manifest_rel = set(item.get("relpath") for item in files)
+                for root, _dirs, names in os.walk(live):
+                    for name in names:
+                        full = os.path.join(root, name)
+                        rel = os.path.relpath(full, live)
+                        if rel not in manifest_rel:
+                            live_hash = _file_sha256(full)
+                            if live_hash not in recognized_checksums:
+                                errors.append("unrecognized destination drift: %s" % full)
+            dir_rec = dict(entry)
+            dir_rec["source_sha256"] = None
+            recorded.append(dir_rec)
+            for item in files:
+                src = item["source_path"]
+                if not os.path.isfile(src):
+                    errors.append("source file missing: %s" % src)
+                    continue
+                relpath = os.path.join(entry.get("relpath") or "payload/runtime", item["relpath"])
+                live_path = os.path.join(live, item["relpath"]) if live else None
+                if live_path and os.path.isfile(live_path):
+                    live_hash = _file_sha256(live_path)
+                    src_hash = _file_sha256(src)
+                    if live_hash != src_hash and live_hash not in recognized_checksums:
+                        errors.append("unrecognized destination drift: %s" % live_path)
+                        continue
+                remember_file(entry, src, relpath, live_path, "payload_file")
+            continue
+        if not os.path.isfile(source):
+            errors.append("source file missing: %s" % source)
+            continue
+        if live and os.path.exists(live):
+            if os.path.isdir(live):
+                errors.append(
+                    "unrecognized destination drift, directory where file expected: %s" % live
+                )
+                continue
+            live_hash = _file_sha256(live)
+            src_hash = _file_sha256(source)
+            if live_hash != src_hash and live_hash not in recognized_checksums:
+                errors.append("unrecognized destination drift: %s" % live)
+                continue
+        remember_file(entry, source, entry.get("relpath"), live, entry.get("class") or "file")
+
+    if errors:
+        return {
+            "errors": errors,
+            "entries": [],
+            "service_state": list(service_state or []),
+            "backup_root": backup_root,
+            "worker_denied": True,
+        }
+    return {
+        "errors": [],
+        "entries": recorded,
+        "service_state": list(service_state or []),
+        "backup_root": backup_root,
+        "worker_denied": True,
+        "never_overwrite_unrecognized": True,
+    }
+
+
+def prodqual_stage_restore(backup, staging_root):
+    errors = []
+    os.makedirs(staging_root, exist_ok=True)
+    staged = []
+    for entry in backup.get("entries") or []:
+        if entry.get("kind") == "directory" and entry.get("class") != "payload_file":
+            continue
+        backup_path = entry.get("backup_path")
+        relpath = entry.get("relpath")
+        expected = entry.get("source_sha256")
+        if not relpath or not expected:
+            continue
+        if not backup_path or not os.path.isfile(backup_path):
+            errors.append("backup object missing for %s" % relpath)
+            continue
+        actual = _file_sha256(backup_path)
+        if actual != expected:
+            errors.append("backup object hash mismatch for %s" % relpath)
+            continue
+        dest = os.path.join(staging_root, relpath)
+        _copy_into(backup_path, dest)
+        staged_hash = _file_sha256(dest)
+        if staged_hash != expected:
+            errors.append("staged hash mismatch for %s" % relpath)
+            continue
+        staged.append(
+            {
+                "relpath": relpath,
+                "path": dest,
+                "sha256": expected,
+                "live_path": entry.get("live_path"),
+                "owner": entry.get("owner"),
+                "group": entry.get("group"),
+                "mode": entry.get("mode"),
+                "flags": entry.get("flags") or "",
+                "class": entry.get("class"),
+            }
+        )
+    return {"errors": errors, "staged": staged, "staging_root": staging_root}
+
+
+def prodqual_live_restore(backup, staging_root, restore_authorized=False, restore_live_authorized=False):
+    errors = []
+    if not restore_authorized:
+        return {"errors": ["restore is not authorized"]}
+    staged = prodqual_stage_restore(backup, staging_root)
+    if staged["errors"]:
+        return staged
+    if not restore_live_authorized:
+        return {
+            "errors": ["live restore writes require separate restore live authorization"],
+            "staged": staged["staged"],
+        }
+    for item in staged["staged"]:
+        live = item.get("live_path")
+        if not live:
+            errors.append("missing live_path")
+            continue
+        _copy_into(item["path"], live)
+        if _file_sha256(live) != item["sha256"]:
+            errors.append("live hash mismatch for %s" % live)
+    return {"errors": errors, "staged": staged["staged"]}
+
+
+def prodqual_rollback(backup, staging_root, rollback_authorized=False, extra_live_paths=None):
+    if not rollback_authorized:
+        return {"errors": ["rollback is not authorized"]}
+    extra = list(extra_live_paths or [])
+    known = set()
+    for entry in backup.get("entries") or []:
+        live = entry.get("live_path")
+        if live:
+            known.add(os.path.abspath(live))
+    errors = []
+    for path in extra:
+        if os.path.abspath(path) not in known:
+            errors.append("unknown destination refused: %s" % path)
+    if errors:
+        return {"errors": errors}
+    return prodqual_live_restore(
+        backup,
+        staging_root,
+        restore_authorized=True,
+        restore_live_authorized=True,
+    )
+
+
+def prodqual_build_backup_entries(config):
+    runtime_root = config.get("runtime_root")
+    launchd = config.get("authority_launchd_dir")
+    worker_launchd = config.get("worker_launchd_dir") or launchd
+    payload_files = []
+    for item in config.get("runtime_files") or []:
+        relpath = item.get("path")
+        payload_files.append(
+            {
+                "relpath": relpath,
+                "source_path": os.path.join(runtime_root, relpath),
+            }
+        )
+    owner = config.get("runtime_owner") or "noesis-authority"
+    group = config.get("authority_group") or "noesis-authority"
+    return [
+        {
+            "class": "manifest",
+            "kind": "file",
+            "source_path": config.get("manifest_path"),
+            "live_path": config.get("manifest_path"),
+            "relpath": "payload/approved-release-manifest.json",
+            "owner": owner,
+            "group": group,
+            "mode": config.get("manifest_mode") or "0640",
+            "flags": "",
+        },
+        {
+            "class": "payload",
+            "kind": "directory",
+            "source_path": runtime_root,
+            "live_path": runtime_root,
+            "relpath": "payload/runtime",
+            "owner": owner,
+            "group": group,
+            "mode": config.get("runtime_dir_mode") or "0755",
+            "flags": "",
+            "files": payload_files,
+        },
+        {
+            "class": "plist",
+            "kind": "file",
+            "source_path": os.path.join(launchd, "ai.noesis.broker.plist"),
+            "live_path": os.path.join(launchd, "ai.noesis.broker.plist"),
+            "relpath": "plists/ai.noesis.broker.plist",
+            "owner": "root",
+            "group": "wheel",
+            "mode": "0644",
+            "flags": "",
+        },
+        {
+            "class": "plist",
+            "kind": "file",
+            "source_path": os.path.join(launchd, "ai.noesis.orchestrator.plist"),
+            "live_path": os.path.join(launchd, "ai.noesis.orchestrator.plist"),
+            "relpath": "plists/ai.noesis.orchestrator.plist",
+            "owner": "root",
+            "group": "wheel",
+            "mode": "0644",
+            "flags": "",
+        },
+        {
+            "class": "plist",
+            "kind": "file",
+            "source_path": os.path.join(launchd, "ai.hermes.gateway.plist"),
+            "live_path": os.path.join(launchd, "ai.hermes.gateway.plist"),
+            "relpath": "plists/ai.hermes.gateway.plist",
+            "owner": "root",
+            "group": "wheel",
+            "mode": "0644",
+            "flags": "",
+        },
+        {
+            "class": "plist",
+            "kind": "file",
+            "source_path": os.path.join(worker_launchd, "ai.openclaw.gateway.plist"),
+            "live_path": os.path.join(worker_launchd, "ai.openclaw.gateway.plist"),
+            "relpath": "plists/ai.openclaw.gateway.plist",
+            "owner": "root",
+            "group": "wheel",
+            "mode": "0644",
+            "flags": "",
+        },
+    ]
+
+
 class FilterModule(object):
     def filters(self):
         return {
             "prodqual_policy_errors": prodqual_policy_errors,
+            "prodqual_static_policy_errors": prodqual_static_policy_errors,
+            "prodqual_identity_policy_errors": prodqual_identity_policy_errors,
+            "prodqual_live_service_errors": prodqual_live_service_errors,
+            "prodqual_parse_launchctl_list": prodqual_parse_launchctl_list,
+            "prodqual_launchd_decision": prodqual_launchd_decision,
+            "prodqual_bootout_failed_when": prodqual_bootout_failed_when,
+            "prodqual_interpret_worker_probe": prodqual_interpret_worker_probe,
+            "prodqual_hermes_gateway_argv": prodqual_hermes_gateway_argv,
+            "prodqual_backup_copy": prodqual_backup_copy,
+            "prodqual_stage_restore": prodqual_stage_restore,
+            "prodqual_live_restore": prodqual_live_restore,
+            "prodqual_rollback": prodqual_rollback,
+            "prodqual_build_backup_entries": prodqual_build_backup_entries,
+            "prodqual_process_uids_from_ps": prodqual_process_uids_from_ps,
         }
