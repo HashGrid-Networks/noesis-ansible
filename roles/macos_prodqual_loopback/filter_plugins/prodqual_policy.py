@@ -37,11 +37,19 @@ REQUIRED_RUNTIME_FILES = (
     "agent/turn_recovery.py",
     "run_agent.py",
     "agent/legacy_cli.py",
+    "tools/approval_yolo.py",
+    "agent/compression_facade.py",
+    "agent/conversation_compression.py",
 )
 REQUIRED_RUNTIME_DIGEST = (
-    "9450ccf6b4f84538e3b15053d9a2618011bd89c4e9a9aa0d287b41d88bd37425"
+    "3314ff8e88e1433bc0d9bf2ba6cd08efb7be99132ee79a8d6eaea6a9c398eb01"
 )
-REQUIRED_RECIPE = "hardening-1-trusted-manifest-runtime/v1"
+REQUIRED_RECIPE = "hardening-1-trusted-manifest-runtime/v2"
+LEASE_STATUS_ALLOWED = (
+    "pending_successor_review",
+    "unreviewed",
+    "approved_with_comments_lease_sentinel_r4_skeptic_r1",
+)
 REQUIRED_MANIFEST_SCHEMA = "noesis.approved_release_manifest/v1"
 REQUIRED_ENV = (
     "HERMES_GOVERNED_PRODUCTION",
@@ -364,8 +372,8 @@ def prodqual_static_policy_errors(config):
         errors.append("manifest schema must be %s" % REQUIRED_MANIFEST_SCHEMA)
 
     files = list(config.get("runtime_files") or [])
-    if len(files) != 8:
-        errors.append("runtime file set must contain exactly 8 paths")
+    if len(files) != 11:
+        errors.append("runtime file set must contain exactly 11 paths")
     observed_paths = []
     for item in files:
         if not isinstance(item, dict):
@@ -391,11 +399,11 @@ def prodqual_static_policy_errors(config):
         errors.extend(
             _commit_errors(config.get("lease_candidate_commit"), "lease_candidate_commit")
         )
-        if config.get("lease_candidate_status") not in (
-            "pending_successor_review",
-            "unreviewed",
-        ):
-            errors.append("lease candidate must remain pending review; do not pin as approved")
+        if config.get("lease_candidate_status") not in LEASE_STATUS_ALLOWED:
+            errors.append(
+                "lease candidate status must be pending_successor_review, unreviewed, "
+                "or approved_with_comments_lease_sentinel_r4_skeptic_r1"
+            )
 
     for cap in (
         "timeout_seconds",

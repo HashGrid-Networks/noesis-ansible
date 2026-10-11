@@ -86,10 +86,10 @@ class HermesArgvBindTests(unittest.TestCase):
             {
                 "prodqual_authority_uid": 901,
                 "prodqual_worker_uid": 902,
-                "prodqual_hardening_candidate_commit": "059c3b5bd80693205bd3e98dd916b650f98e82b8",
+                "prodqual_hardening_candidate_commit": "d70372b6ce35c3a0f1243fda8d810c3e24c16940",
                 "prodqual_runtime_payload_digest": REQUIRED_RUNTIME_DIGEST,
                 "prodqual_ansible_baseline_commit": "ffb1357d07ccdde0036c82acb47073b9d6770037",
-                "prodqual_agent_stack_commit": "60ff6377684b09bd2a12816e7ae1e1624fe602a1",
+                "prodqual_agent_stack_commit": "7f42dc7785507b41e61885e7d8000e703637e305",
             }
         )
         rendered = render_jinja(
@@ -547,6 +547,111 @@ class LiveStaleLabelTests(unittest.TestCase):
         self.assertIn("not (prodqual_offline_mode | bool)", preflight)
 
 
+V2_CANDIDATE_ID = "prodqual-hermes-adaptation-successor/v1"
+V2_RECIPE = "hardening-1-trusted-manifest-runtime/v2"
+V2_DIGEST = "3314ff8e88e1433bc0d9bf2ba6cd08efb7be99132ee79a8d6eaea6a9c398eb01"
+V2_ADAPTATION_COMMIT = "d70372b6ce35c3a0f1243fda8d810c3e24c16940"
+V2_PIN_STATUS = "approved_with_comments_adaptation_sentinel_r2_skeptic_r1"
+V2_LEASE_COMMIT = "7f42dc7785507b41e61885e7d8000e703637e305"
+V2_LEASE_STATUS = "approved_with_comments_lease_sentinel_r4_skeptic_r1"
+V2_PACKAGE_PARENT = "ba6911a54787861f748a526fce7ff18926c7740d"
+V2_AGENT_STACK = "7f42dc7785507b41e61885e7d8000e703637e305"
+V2_RUNTIME_FILES = (
+    ("agent/agent_init.py", "0764575f3666186b1bd0480b2ef48942a11c4dc14f52f8afe757e80a790b6715"),
+    ("agent/error_classifier.py", "dc0514324c17cbbca5966051b395ed62ba8f2a4afcfd764fd568a4002c005f2e"),
+    ("agent/runtime_enforcement.py", "76664e9257d6530f6cebab2ec7a2109e3c88c2736478e056dd22e0c2636a15d7"),
+    ("agent/turn_api_call.py", "40912fac8add1ebdc9a4088dd150584a1cf578954152b2b00636bdbcadb88980"),
+    ("agent/turn_api_error.py", "03d5715a2ec37526048f58316e133244e5ce0cd9c7b08b0cf0af1abe6583fd0a"),
+    ("agent/turn_recovery.py", "7496a5493991ee875a1f9c3f8a9689101073c05f95b0923765067793648154b1"),
+    ("run_agent.py", "c4066c1bfd6de65a491549fce5cc0adc54b7f1ad2bdcb10b9fb7cf90e366caca"),
+    ("agent/legacy_cli.py", "84d2a3ad750355ddd8439afa9e49413eafeef5a3e8c5b69aec55345b4a305bf2"),
+    ("tools/approval_yolo.py", "c0b721b9b3ce4d4b23d6329e69d531654f0f9638e720f8e0ec9d94480e998905"),
+    ("agent/compression_facade.py", "ab79c855e565f36443b3c945209cff6392ce9c1b170a5691d9b16f040b3a35d4"),
+    ("agent/conversation_compression.py", "67aaac8f55eee1e0a795f6fdcb3104b63b9785a1967db1b82f90ae3722daa428"),
+)
+
+
+class AdaptationSuccessorV2PinTests(unittest.TestCase):
+    def test_defaults_carry_v2_adaptation_identity(self):
+        defaults = load_yaml(ROLE / "defaults" / "main.yml")
+        self.assertEqual(defaults["prodqual_candidate_id"], V2_CANDIDATE_ID)
+        self.assertEqual(defaults["prodqual_runtime_payload_recipe_version"], V2_RECIPE)
+        self.assertEqual(defaults["prodqual_hardening_candidate_commit"], V2_ADAPTATION_COMMIT)
+        self.assertEqual(defaults["prodqual_hardening_pin_status"], V2_PIN_STATUS)
+        self.assertEqual(defaults["prodqual_package_parent_commit"], V2_PACKAGE_PARENT)
+        self.assertEqual(defaults["prodqual_runtime_payload_digest"], V2_DIGEST)
+        self.assertEqual(
+            defaults["prodqual_ansible_baseline_commit"],
+            "ffb1357d07ccdde0036c82acb47073b9d6770037",
+        )
+        self.assertEqual(defaults["prodqual_agent_stack_commit"], V2_AGENT_STACK)
+        self.assertEqual(defaults["prodqual_lease_candidate_commit"], V2_LEASE_COMMIT)
+        self.assertEqual(defaults["prodqual_lease_candidate_status"], V2_LEASE_STATUS)
+        self.assertEqual(defaults["prodqual_expected_runtime_payload_digest"], V2_DIGEST)
+        observed = [(item["path"], item["sha256"]) for item in defaults["prodqual_runtime_files"]]
+        self.assertEqual(observed, list(V2_RUNTIME_FILES))
+        self.assertEqual(len(observed), 11)
+
+    def test_policy_constants_and_v1_recipe_are_rejected(self):
+        self.assertEqual(REQUIRED_RUNTIME_DIGEST, V2_DIGEST)
+        self.assertEqual(len(REQUIRED_RUNTIME_FILES), 11)
+        self.assertEqual(tuple(REQUIRED_RUNTIME_FILES), tuple(path for path, _ in V2_RUNTIME_FILES))
+        v1 = valid_config()
+        v1["runtime_payload_recipe_version"] = "hardening-1-trusted-manifest-runtime/v1"
+        v1["runtime_payload_digest"] = "9450ccf6b4f84538e3b15053d9a2618011bd89c4e9a9aa0d287b41d88bd37425"
+        v1["runtime_files"] = valid_config()["runtime_files"][:8]
+        errors = prodqual_policy_errors(v1)
+        self.assertTrue(
+            any("recipe" in item or "v1" in item or "mismatch" in item for item in errors)
+        )
+
+    def test_manifest_renders_v2_identity_lease_and_pin_status(self):
+        defaults = load_yaml(ROLE / "defaults" / "main.yml")
+        rendered = render_jinja(
+            (TEMPLATES / "approved-release-manifest.json.j2").read_text(encoding="utf-8"),
+            defaults,
+        )
+        payload = json.loads(rendered)
+        self.assertEqual(payload["candidate_id"], V2_CANDIDATE_ID)
+        self.assertEqual(payload["runtime_payload_recipe_version"], V2_RECIPE)
+        self.assertEqual(payload["runtime_payload_digest"], V2_DIGEST)
+        self.assertEqual(payload["candidate_commit"], V2_ADAPTATION_COMMIT)
+        self.assertEqual(payload["pin_status"], V2_PIN_STATUS)
+        self.assertEqual(
+            [(item["path"], item["sha256"]) for item in payload["files"]],
+            list(V2_RUNTIME_FILES),
+        )
+        self.assertEqual(len(payload["files"]), 11)
+        self.assertEqual(defaults["prodqual_lease_candidate_commit"], V2_LEASE_COMMIT)
+        self.assertEqual(defaults["prodqual_lease_candidate_status"], V2_LEASE_STATUS)
+
+    def test_pinned_hash_concat_recomputes_v2_digest(self):
+        defaults = load_yaml(ROLE / "defaults" / "main.yml")
+        hashes = [item["sha256"] for item in defaults["prodqual_runtime_files"]]
+        self.assertEqual(hashes, [digest for _, digest in V2_RUNTIME_FILES])
+        self.assertEqual("".join(hashes), "".join(digest for _, digest in V2_RUNTIME_FILES))
+        self.assertEqual(len("".join(hashes)), 64 * 11)
+        self.assertEqual(defaults["prodqual_runtime_payload_digest"], V2_DIGEST)
+        self.assertEqual(defaults["prodqual_expected_runtime_payload_digest"], V2_DIGEST)
+        self.assertEqual(REQUIRED_RUNTIME_DIGEST, V2_DIGEST)
+
+    def test_docs_record_supersession_and_adaptation_ancestry(self):
+        docs = (REPO / "docs" / "prodqual" / "macos-arm64-loopback-target.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("prodqual-hermes-adaptation-successor/v1", docs)
+        self.assertIn("hardening-1-trusted-manifest-runtime/v2", docs)
+        self.assertIn("3314ff8e88e1433bc0d9bf2ba6cd08efb7be99132ee79a8d6eaea6a9c398eb01", docs)
+        self.assertIn("ba6911a54787861f748a526fce7ff18926c7740d", docs)
+        self.assertIn("SUPERSEDED", docs)
+        self.assertIn("b2ad468e", docs)
+        self.assertIn("059c3b5b", docs)
+        normalized = docs.lower().replace("—", " ").replace("-", " ")
+        self.assertIn("not a silent drop in", normalized)
+        self.assertIn("d70372b6", docs)
+        self.assertIn("phase a", docs.lower())
+
+
 class ReleaseMetadataTests(unittest.TestCase):
     def test_hardening_pin_status_is_scoped_not_unreviewed(self):
         defaults = load_yaml(ROLE / "defaults" / "main.yml")
@@ -555,11 +660,11 @@ class ReleaseMetadataTests(unittest.TestCase):
         )
         self.assertEqual(
             defaults["prodqual_hardening_pin_status"],
-            "pass_with_comments_scoped_hardening_r2",
+            "approved_with_comments_adaptation_sentinel_r2_skeptic_r1",
         )
         self.assertEqual(
             fixture["prodqual_hardening_pin_status"],
-            "pass_with_comments_scoped_hardening_r2",
+            "approved_with_comments_adaptation_sentinel_r2_skeptic_r1",
         )
         self.assertNotEqual(
             defaults["prodqual_hardening_pin_status"], "unreviewed_pending_sentinel"
@@ -581,23 +686,27 @@ class ReleaseMetadataTests(unittest.TestCase):
         )
         self.assertEqual(
             fixture.get("prodqual_package_parent_commit"),
-            "9059a277b753bd3d7bd83f0b4ab0dbd9b2b34c7e",
+            "ba6911a54787861f748a526fce7ff18926c7740d",
         )
         docs = (REPO / "docs" / "prodqual" / "macos-arm64-loopback-target.md").read_text(
             encoding="utf-8"
         )
         self.assertIn("Ansible repository baseline", docs)
         self.assertIn("not the package candidate", docs)
-        self.assertEqual(fixture["prodqual_lease_candidate_commit"], "")
         self.assertEqual(
-            fixture["prodqual_lease_candidate_status"], "pending_successor_review"
+            fixture["prodqual_lease_candidate_commit"],
+            "7f42dc7785507b41e61885e7d8000e703637e305",
+        )
+        self.assertEqual(
+            fixture["prodqual_lease_candidate_status"],
+            "approved_with_comments_lease_sentinel_r4_skeptic_r1",
         )
 
     def test_policy_not_schema_is_runtime_path_authority(self):
         schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
         self.assertNotIn("const", schema["properties"]["files"].get("items", {}).get("properties", {}).get("path", {}))
         self.assertEqual(list(REQUIRED_RUNTIME_FILES)[0], "agent/agent_init.py")
-        self.assertEqual(len(REQUIRED_RUNTIME_FILES), 8)
+        self.assertEqual(len(REQUIRED_RUNTIME_FILES), 11)
         cfg = valid_config(lease_candidate_commit="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", lease_candidate_status="approved")
         errors = prodqual_policy_errors(cfg)
         self.assertTrue(any("approved" in item or "pending" in item for item in errors))

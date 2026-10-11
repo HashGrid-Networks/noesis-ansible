@@ -105,7 +105,7 @@ def valid_config(**overrides):
             "HERMES_NOESIS_AUTHORITY_UID",
             "HERMES_NOESIS_WORKER_UID",
         ],
-        "runtime_payload_recipe_version": "hardening-1-trusted-manifest-runtime/v1",
+        "runtime_payload_recipe_version": "hardening-1-trusted-manifest-runtime/v2",
         "manifest_schema_version": "noesis.approved_release_manifest/v1",
         "runtime_files": [
             {
@@ -118,7 +118,7 @@ def valid_config(**overrides):
             },
             {
                 "path": "agent/runtime_enforcement.py",
-                "sha256": "14af36774ce21ee95fd85c946851249b394729d90555d58d0d15706ad43c0f6a",
+                "sha256": "76664e9257d6530f6cebab2ec7a2109e3c88c2736478e056dd22e0c2636a15d7",
             },
             {
                 "path": "agent/turn_api_call.py",
@@ -130,23 +130,35 @@ def valid_config(**overrides):
             },
             {
                 "path": "agent/turn_recovery.py",
-                "sha256": "5d5bce3f26e0c20be4db14d30970931fe27e8efa1494e865637b68de5486207a",
+                "sha256": "7496a5493991ee875a1f9c3f8a9689101073c05f95b0923765067793648154b1",
             },
             {
                 "path": "run_agent.py",
-                "sha256": "48c6cb7dd9ab569e8b96a8ca2925f0b10a3e53f4b4d1bb069520e62a9af05a7c",
+                "sha256": "c4066c1bfd6de65a491549fce5cc0adc54b7f1ad2bdcb10b9fb7cf90e366caca",
             },
             {
                 "path": "agent/legacy_cli.py",
-                "sha256": "d770e15e02cd7d5b4e4d292097a537d166b4066b7d56800163403c9a24ba738c",
+                "sha256": "84d2a3ad750355ddd8439afa9e49413eafeef5a3e8c5b69aec55345b4a305bf2",
+            },
+            {
+                "path": "tools/approval_yolo.py",
+                "sha256": "c0b721b9b3ce4d4b23d6329e69d531654f0f9638e720f8e0ec9d94480e998905",
+            },
+            {
+                "path": "agent/compression_facade.py",
+                "sha256": "ab79c855e565f36443b3c945209cff6392ce9c1b170a5691d9b16f040b3a35d4",
+            },
+            {
+                "path": "agent/conversation_compression.py",
+                "sha256": "67aaac8f55eee1e0a795f6fdcb3104b63b9785a1967db1b82f90ae3722daa428",
             },
         ],
         "runtime_payload_digest": REQUIRED_RUNTIME_DIGEST,
-        "hardening_candidate_commit": "059c3b5bd80693205bd3e98dd916b650f98e82b8",
+        "hardening_candidate_commit": "d70372b6ce35c3a0f1243fda8d810c3e24c16940",
         "ansible_baseline_commit": "ffb1357d07ccdde0036c82acb47073b9d6770037",
-        "agent_stack_commit": "60ff6377684b09bd2a12816e7ae1e1624fe602a1",
-        "lease_candidate_commit": "",
-        "lease_candidate_status": "pending_successor_review",
+        "agent_stack_commit": "7f42dc7785507b41e61885e7d8000e703637e305",
+        "lease_candidate_commit": "7f42dc7785507b41e61885e7d8000e703637e305",
+        "lease_candidate_status": "approved_with_comments_lease_sentinel_r4_skeptic_r1",
         "timeout_seconds": 1800,
         "exit_timeout_seconds": 20,
         "throttle_interval_seconds": 30,
@@ -214,7 +226,30 @@ class PolicyTests(unittest.TestCase):
         errors = prodqual_policy_errors(valid_config(runtime_files=files))
         self.assertTrue(any("order" in item for item in errors))
         self.assertEqual(tuple(p for p in REQUIRED_RUNTIME_FILES), REQUIRED_RUNTIME_FILES)
-        self.assertEqual(len(REQUIRED_RUNTIME_FILES), 8)
+        self.assertEqual(len(REQUIRED_RUNTIME_FILES), 11)
+
+    def test_v2_defaults_and_policy_reject_v1_recipe(self):
+        defaults = load_yaml(ROLE / "defaults" / "main.yml")
+        self.assertEqual(
+            defaults["prodqual_candidate_id"], "prodqual-hermes-adaptation-successor/v1"
+        )
+        self.assertEqual(
+            defaults["prodqual_runtime_payload_recipe_version"],
+            "hardening-1-trusted-manifest-runtime/v2",
+        )
+        self.assertEqual(
+            defaults["prodqual_expected_runtime_payload_digest"],
+            "3314ff8e88e1433bc0d9bf2ba6cd08efb7be99132ee79a8d6eaea6a9c398eb01",
+        )
+        self.assertEqual(len(defaults["prodqual_runtime_files"]), 11)
+        self.assertEqual(
+            REQUIRED_RUNTIME_DIGEST,
+            "3314ff8e88e1433bc0d9bf2ba6cd08efb7be99132ee79a8d6eaea6a9c398eb01",
+        )
+        errors = prodqual_policy_errors(
+            valid_config(runtime_payload_recipe_version="hardening-1-trusted-manifest-runtime/v1")
+        )
+        self.assertTrue(any("recipe" in item for item in errors))
 
     def test_loopback_only_bind_enforcement(self):
         errors = prodqual_policy_errors(
@@ -241,10 +276,10 @@ class TemplateTests(unittest.TestCase):
             {
                 "prodqual_authority_uid": 901,
                 "prodqual_worker_uid": 902,
-                "prodqual_hardening_candidate_commit": "059c3b5bd80693205bd3e98dd916b650f98e82b8",
+                "prodqual_hardening_candidate_commit": "d70372b6ce35c3a0f1243fda8d810c3e24c16940",
                 "prodqual_runtime_payload_digest": REQUIRED_RUNTIME_DIGEST,
                 "prodqual_ansible_baseline_commit": "ffb1357d07ccdde0036c82acb47073b9d6770037",
-                "prodqual_agent_stack_commit": "60ff6377684b09bd2a12816e7ae1e1624fe602a1",
+                "prodqual_agent_stack_commit": "7f42dc7785507b41e61885e7d8000e703637e305",
             }
         )
         return defaults
@@ -263,7 +298,7 @@ class TemplateTests(unittest.TestCase):
             [item["path"] for item in payload["files"]],
             list(REQUIRED_RUNTIME_FILES),
         )
-        self.assertEqual(payload["candidate_commit"], "059c3b5bd80693205bd3e98dd916b650f98e82b8")
+        self.assertEqual(payload["candidate_commit"], "d70372b6ce35c3a0f1243fda8d810c3e24c16940")
         self.assertTrue(payload["trust"]["environment_variable_is_not_authority"])
         second = render_jinja(
             (TEMPLATES / "approved-release-manifest.json.j2").read_text(encoding="utf-8"),

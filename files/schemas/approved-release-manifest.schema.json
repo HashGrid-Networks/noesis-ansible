@@ -28,7 +28,7 @@
     },
     "runtime_payload_recipe_version": {
       "type": "string",
-      "const": "hardening-1-trusted-manifest-runtime/v1"
+      "const": "hardening-1-trusted-manifest-runtime/v2"
     },
     "algorithm": {
       "type": "string",
@@ -46,8 +46,8 @@
     },
     "files": {
       "type": "array",
-      "minItems": 8,
-      "maxItems": 8,
+      "minItems": 11,
+      "maxItems": 11,
       "items": {
         "type": "object",
         "additionalProperties": false,

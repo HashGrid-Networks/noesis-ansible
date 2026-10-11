@@ -124,37 +124,46 @@ prodqual_governed_env_keys:
   - HERMES_NOESIS_WORKER_UID
 
 prodqual_manifest_schema_version: noesis.approved_release_manifest/v1
-prodqual_candidate_id: prodqual-hermes-hardening-trusted-manifest/v1
-prodqual_runtime_payload_recipe_version: hardening-1-trusted-manifest-runtime/v1
-prodqual_hardening_candidate_commit: ""
-prodqual_hardening_pin_status: pass_with_comments_scoped_hardening_r2
-prodqual_package_parent_commit: "9059a277b753bd3d7bd83f0b4ab0dbd9b2b34c7e"
-prodqual_runtime_payload_digest: ""
-prodqual_ansible_baseline_commit: ""
-prodqual_agent_stack_commit: ""
-prodqual_lease_candidate_commit: ""
-prodqual_lease_candidate_status: pending_successor_review
+prodqual_candidate_id: prodqual-hermes-adaptation-successor/v1
+prodqual_runtime_payload_recipe_version: hardening-1-trusted-manifest-runtime/v2
+# candidate_commit in the approved-release manifest is this adaptation successor,
+# not the HARDENING grandparent 059c3b5b….
+prodqual_hardening_candidate_commit: "d70372b6ce35c3a0f1243fda8d810c3e24c16940"
+prodqual_hardening_pin_status: approved_with_comments_adaptation_sentinel_r2_skeptic_r1
+prodqual_package_parent_commit: "ba6911a54787861f748a526fce7ff18926c7740d"
+prodqual_runtime_payload_digest: "3314ff8e88e1433bc0d9bf2ba6cd08efb7be99132ee79a8d6eaea6a9c398eb01"
+prodqual_ansible_baseline_commit: "ffb1357d07ccdde0036c82acb47073b9d6770037"
+prodqual_agent_stack_commit: "7f42dc7785507b41e61885e7d8000e703637e305"
+prodqual_lease_candidate_commit: "7f42dc7785507b41e61885e7d8000e703637e305"
+prodqual_lease_candidate_status: approved_with_comments_lease_sentinel_r4_skeptic_r1
 
-# Frozen HARDENING-1 trusted-manifest runtime interface (hashes, not installed bytes).
+# Frozen adaptation-successor trusted-manifest runtime interface (hashes, not installed bytes).
+# Recipe order is authoritative. Aggregate digest is raw concatenation of the 11 file bytes.
 prodqual_runtime_files:
   - path: agent/agent_init.py
     sha256: 0764575f3666186b1bd0480b2ef48942a11c4dc14f52f8afe757e80a790b6715
   - path: agent/error_classifier.py
     sha256: dc0514324c17cbbca5966051b395ed62ba8f2a4afcfd764fd568a4002c005f2e
   - path: agent/runtime_enforcement.py
-    sha256: 14af36774ce21ee95fd85c946851249b394729d90555d58d0d15706ad43c0f6a
+    sha256: 76664e9257d6530f6cebab2ec7a2109e3c88c2736478e056dd22e0c2636a15d7
   - path: agent/turn_api_call.py
     sha256: 40912fac8add1ebdc9a4088dd150584a1cf578954152b2b00636bdbcadb88980
   - path: agent/turn_api_error.py
     sha256: 03d5715a2ec37526048f58316e133244e5ce0cd9c7b08b0cf0af1abe6583fd0a
   - path: agent/turn_recovery.py
-    sha256: 5d5bce3f26e0c20be4db14d30970931fe27e8efa1494e865637b68de5486207a
+    sha256: 7496a5493991ee875a1f9c3f8a9689101073c05f95b0923765067793648154b1
   - path: run_agent.py
-    sha256: 48c6cb7dd9ab569e8b96a8ca2925f0b10a3e53f4b4d1bb069520e62a9af05a7c
+    sha256: c4066c1bfd6de65a491549fce5cc0adc54b7f1ad2bdcb10b9fb7cf90e366caca
   - path: agent/legacy_cli.py
-    sha256: d770e15e02cd7d5b4e4d292097a537d166b4066b7d56800163403c9a24ba738c
+    sha256: 84d2a3ad750355ddd8439afa9e49413eafeef5a3e8c5b69aec55345b4a305bf2
+  - path: tools/approval_yolo.py
+    sha256: c0b721b9b3ce4d4b23d6329e69d531654f0f9638e720f8e0ec9d94480e998905
+  - path: agent/compression_facade.py
+    sha256: ab79c855e565f36443b3c945209cff6392ce9c1b170a5691d9b16f040b3a35d4
+  - path: agent/conversation_compression.py
+    sha256: 67aaac8f55eee1e0a795f6fdcb3104b63b9785a1967db1b82f90ae3722daa428
 
-prodqual_expected_runtime_payload_digest: 9450ccf6b4f84538e3b15053d9a2618011bd89c4e9a9aa0d287b41d88bd37425
+prodqual_expected_runtime_payload_digest: 3314ff8e88e1433bc0d9bf2ba6cd08efb7be99132ee79a8d6eaea6a9c398eb01
 
 # Credential delivery is a later activation concern. References only; no values.
 prodqual_authority_credential_refs:

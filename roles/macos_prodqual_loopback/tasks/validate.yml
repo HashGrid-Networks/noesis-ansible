@@ -13,8 +13,8 @@
   ansible.builtin.assert:
     that:
       - prodqual_runtime_payload_digest == prodqual_expected_runtime_payload_digest
-      - prodqual_runtime_files | length == 8
-      - prodqual_runtime_payload_recipe_version == 'hardening-1-trusted-manifest-runtime/v1'
+      - prodqual_runtime_files | length == 11
+      - prodqual_runtime_payload_recipe_version == 'hardening-1-trusted-manifest-runtime/v2'
     fail_msg: "HARDENING runtime recipe/digest mismatch"
 
 - name: Validate hermes gateway process-supervised interface

@@ -46,14 +46,14 @@ prodqual_orchestrator_bin: "{{ inventory_dir }}/staging/runtime/control-plane/su
 prodqual_hermes_bin: "{{ inventory_dir }}/staging/runtime/bin/hermes"
 prodqual_openclaw_bin: "{{ inventory_dir }}/staging/runtime/bin/openclaw"
 
-prodqual_hardening_candidate_commit: "059c3b5bd80693205bd3e98dd916b650f98e82b8"
-prodqual_hardening_pin_status: pass_with_comments_scoped_hardening_r2
-prodqual_runtime_payload_digest: "9450ccf6b4f84538e3b15053d9a2618011bd89c4e9a9aa0d287b41d88bd37425"
+prodqual_hardening_candidate_commit: "d70372b6ce35c3a0f1243fda8d810c3e24c16940"
+prodqual_hardening_pin_status: approved_with_comments_adaptation_sentinel_r2_skeptic_r1
+prodqual_runtime_payload_digest: "3314ff8e88e1433bc0d9bf2ba6cd08efb7be99132ee79a8d6eaea6a9c398eb01"
 prodqual_ansible_baseline_commit: "ffb1357d07ccdde0036c82acb47073b9d6770037"
-prodqual_package_parent_commit: "9059a277b753bd3d7bd83f0b4ab0dbd9b2b34c7e"
-prodqual_agent_stack_commit: "60ff6377684b09bd2a12816e7ae1e1624fe602a1"
-prodqual_lease_candidate_commit: ""
-prodqual_lease_candidate_status: pending_successor_review
+prodqual_package_parent_commit: "ba6911a54787861f748a526fce7ff18926c7740d"
+prodqual_agent_stack_commit: "7f42dc7785507b41e61885e7d8000e703637e305"
+prodqual_lease_candidate_commit: "7f42dc7785507b41e61885e7d8000e703637e305"
+prodqual_lease_candidate_status: approved_with_comments_lease_sentinel_r4_skeptic_r1
 
 prodqual_tailscale_bind_enabled: false
 prodqual_public_bind_enabled: false
