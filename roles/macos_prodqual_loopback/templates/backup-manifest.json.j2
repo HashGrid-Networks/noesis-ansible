@@ -1,0 +1,83 @@
+{
+  "schema_version": "noesis.prodqual.backup_manifest/v1",
+  "content_addressed": true,
+  "algorithm": "SHA-256",
+  "worker_denied": true,
+  "backup_root": "{{ prodqual_backup_root }}",
+  "never_overwrite_unrecognized": true,
+  "entries": [
+    {
+      "class": "manifest",
+      "source_path": "{{ prodqual_manifest_path }}",
+      "destination_path": "{{ prodqual_backup_root }}/payload/approved-release-manifest.json",
+      "source_sha256": "{{ prodqual_runtime_payload_digest }}",
+      "owner": "{{ prodqual_authority_user }}",
+      "group": "{{ prodqual_authority_group }}",
+      "mode": "{{ prodqual_manifest_mode }}",
+      "flags": "",
+      "recognized": true
+    },
+    {
+      "class": "payload",
+      "source_path": "{{ prodqual_runtime_root }}",
+      "destination_path": "{{ prodqual_backup_root }}/payload/runtime",
+      "source_sha256": "{{ prodqual_runtime_payload_digest }}",
+      "owner": "{{ prodqual_authority_user }}",
+      "group": "{{ prodqual_authority_group }}",
+      "mode": "{{ prodqual_runtime_dir_mode }}",
+      "flags": "{{ 'uchg' if prodqual_runtime_immutable | bool else '' }}",
+      "recognized": true
+    },
+    {
+      "class": "plist",
+      "source_path": "{{ prodqual_authority_launchd_dir }}/ai.noesis.broker.plist",
+      "destination_path": "{{ prodqual_backup_root }}/plists/ai.noesis.broker.plist",
+      "owner": "{{ prodqual_launchd_plist_owner }}",
+      "group": "{{ prodqual_launchd_plist_group }}",
+      "mode": "{{ prodqual_launchd_plist_mode }}",
+      "flags": "",
+      "recognized": true
+    },
+    {
+      "class": "plist",
+      "source_path": "{{ prodqual_authority_launchd_dir }}/ai.noesis.orchestrator.plist",
+      "destination_path": "{{ prodqual_backup_root }}/plists/ai.noesis.orchestrator.plist",
+      "owner": "{{ prodqual_launchd_plist_owner }}",
+      "group": "{{ prodqual_launchd_plist_group }}",
+      "mode": "{{ prodqual_launchd_plist_mode }}",
+      "flags": "",
+      "recognized": true
+    },
+    {
+      "class": "plist",
+      "source_path": "{{ prodqual_authority_launchd_dir }}/ai.hermes.gateway.plist",
+      "destination_path": "{{ prodqual_backup_root }}/plists/ai.hermes.gateway.plist",
+      "owner": "{{ prodqual_launchd_plist_owner }}",
+      "group": "{{ prodqual_launchd_plist_group }}",
+      "mode": "{{ prodqual_launchd_plist_mode }}",
+      "flags": "",
+      "recognized": true
+    },
+    {
+      "class": "plist",
+      "source_path": "{{ prodqual_worker_launchd_dir }}/ai.openclaw.gateway.plist",
+      "destination_path": "{{ prodqual_backup_root }}/plists/ai.openclaw.gateway.plist",
+      "owner": "{{ prodqual_launchd_plist_owner }}",
+      "group": "{{ prodqual_launchd_plist_group }}",
+      "mode": "{{ prodqual_launchd_plist_mode }}",
+      "flags": "",
+      "recognized": true
+    }
+  ],
+  "service_state": [
+{% for label in prodqual_service_labels %}
+    {
+      "label": "{{ label }}",
+      "loaded": false,
+      "pid": null,
+      "phase": "offline_validation"
+    }{% if not loop.last %},{% endif %}
+
+{% endfor %}
+  ]
+}

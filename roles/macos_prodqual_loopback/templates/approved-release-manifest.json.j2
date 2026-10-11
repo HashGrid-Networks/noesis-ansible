@@ -1,0 +1,26 @@
+{
+  "schema_version": "{{ prodqual_manifest_schema_version }}",
+  "candidate_id": "{{ prodqual_candidate_id }}",
+  "candidate_commit": "{{ prodqual_hardening_candidate_commit }}",
+  "runtime_payload_recipe_version": "{{ prodqual_runtime_payload_recipe_version }}",
+  "algorithm": "SHA-256",
+  "concatenation": "raw concatenation of runtime file bytes in listed order with no separators",
+  "bound_runtime_root": "{{ prodqual_runtime_root }}",
+  "tests_excluded": true,
+  "files": [
+{% for item in prodqual_runtime_files %}
+    {
+      "path": "{{ item.path }}",
+      "sha256": "{{ item.sha256 }}"
+    }{% if not loop.last %},{% endif %}
+
+{% endfor %}
+  ],
+  "runtime_payload_digest": "{{ prodqual_runtime_payload_digest }}",
+  "pin_status": "{{ prodqual_hardening_pin_status }}",
+  "trust": {
+    "manifest_path_env": "HERMES_APPROVED_RELEASE_MANIFEST",
+    "trust_source": "authority_ownership_mode_and_path_isolation",
+    "environment_variable_is_not_authority": true
+  }
+}

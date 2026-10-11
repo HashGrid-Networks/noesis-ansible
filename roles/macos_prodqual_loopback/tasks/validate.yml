@@ -1,0 +1,40 @@
+---
+- name: Validate governed env interface
+  ansible.builtin.assert:
+    that:
+      - prodqual_governed_env_keys | length == 4
+      - "'HERMES_GOVERNED_PRODUCTION' in prodqual_governed_env_keys"
+      - "'HERMES_APPROVED_RELEASE_MANIFEST' in prodqual_governed_env_keys"
+      - "'HERMES_NOESIS_AUTHORITY_UID' in prodqual_governed_env_keys"
+      - "'HERMES_NOESIS_WORKER_UID' in prodqual_governed_env_keys"
+    fail_msg: "governed launchd environment interface mismatch"
+
+- name: Validate runtime recipe digest pairing
+  ansible.builtin.assert:
+    that:
+      - prodqual_runtime_payload_digest == prodqual_expected_runtime_payload_digest
+      - prodqual_runtime_files | length == 8
+      - prodqual_runtime_payload_recipe_version == 'hardening-1-trusted-manifest-runtime/v1'
+    fail_msg: "HARDENING runtime recipe/digest mismatch"
+
+- name: Validate hermes gateway has no TCP public bind
+  ansible.builtin.assert:
+    that:
+      - prodqual_hermes_gateway_bind_class == 'unix_socket'
+      - prodqual_hermes_gateway_socket[0] == '/'
+    fail_msg: "hermes gateway must use an absolute unix socket for this target"
+
+- name: Record that UserName is insufficient boundary evidence
+  ansible.builtin.debug:
+    msg: >-
+      validation of launchd UserName is not sufficient.
+      apply-time worker write probes in filesystem.yml are required
+      before activation.
+
+- name: Activation tags are not implied by offline validation
+  ansible.builtin.assert:
+    that:
+      - not (prodqual_activation_authorized | bool)
+      - not (prodqual_canary_authorized | bool)
+    fail_msg: "offline/validate runs cannot authorize activation or canary"
+  when: prodqual_offline_mode | bool

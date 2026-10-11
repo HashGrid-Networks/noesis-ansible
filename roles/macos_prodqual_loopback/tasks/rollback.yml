@@ -1,0 +1,32 @@
+---
+- name: Render rollback plan
+  ansible.builtin.template:
+    src: rollback-plan.yml.j2
+    dest: "{{ prodqual_rollback_plan_render_path | default(prodqual_backup_root ~ '/rollback-plan.yml') }}"
+    mode: "0600"
+  check_mode: true
+  when: prodqual_offline_mode | bool
+
+- name: Assert rollback plan covers required classes
+  ansible.builtin.assert:
+    that:
+      - "'payload' in prodqual_rollback_classes"
+      - "'manifests' in prodqual_rollback_classes"
+      - "'plists' in prodqual_rollback_classes"
+      - "'ownership_modes_flags' in prodqual_rollback_classes"
+      - "'service_state' in prodqual_rollback_classes"
+    fail_msg: "rollback plan is incomplete"
+  vars:
+    prodqual_rollback_classes:
+      - payload
+      - manifests
+      - plists
+      - ownership_modes_flags
+      - service_state
+
+- name: Rollback execution is separately gated
+  ansible.builtin.debug:
+    msg: >-
+      rollback of live payload/manifests/plists/ownership/service state
+      is not authorized in this run
+  when: not (prodqual_apply_authorized | bool)

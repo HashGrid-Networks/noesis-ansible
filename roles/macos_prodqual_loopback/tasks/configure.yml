@@ -1,0 +1,106 @@
+---
+- name: Resolve render destinations
+  ansible.builtin.set_fact:
+    prodqual_manifest_render_path: "{{ prodqual_manifest_path }}"
+    prodqual_authority_plist_dir: "{{ prodqual_authority_launchd_dir }}"
+    prodqual_worker_plist_dir: "{{ prodqual_worker_launchd_dir }}"
+    prodqual_caps_render_path: "{{ prodqual_authority_run_root }}/resource-caps.yml"
+    prodqual_path_policy_render_path: "{{ prodqual_authority_run_root }}/path-policy.yml"
+    prodqual_backup_plan_render_path: "{{ prodqual_backup_root }}/backup-plan.json"
+    prodqual_rollback_plan_render_path: "{{ prodqual_backup_root }}/rollback-plan.yml"
+
+- name: Require discovered UIDs before rendering governed environment
+  ansible.builtin.assert:
+    that:
+      - prodqual_authority_uid is not none
+      - prodqual_worker_uid is not none
+      - prodqual_authority_uid | string | length > 0
+      - prodqual_worker_uid | string | length > 0
+    fail_msg: "HERMES_NOESIS_*_UID cannot be rendered without discovered numeric UIDs"
+
+- name: Render approved-release manifest
+  ansible.builtin.template:
+    src: approved-release-manifest.json.j2
+    dest: "{{ prodqual_manifest_render_path }}"
+    mode: "{{ prodqual_manifest_mode }}"
+  check_mode: true
+  when: prodqual_offline_mode | bool
+
+- name: Render approved-release manifest (apply)
+  ansible.builtin.template:
+    src: approved-release-manifest.json.j2
+    dest: "{{ prodqual_manifest_render_path }}"
+    owner: "{{ prodqual_authority_user }}"
+    group: "{{ prodqual_authority_group }}"
+    mode: "{{ prodqual_manifest_mode }}"
+  when:
+    - prodqual_apply_authorized | bool
+    - not (prodqual_offline_mode | bool)
+
+- name: Render authority resource caps
+  ansible.builtin.template:
+    src: resource-caps.yml.j2
+    dest: "{{ prodqual_caps_render_path }}"
+    mode: "0600"
+  check_mode: true
+  when: prodqual_offline_mode | bool
+
+- name: Render path policy
+  ansible.builtin.template:
+    src: path-policy.yml.j2
+    dest: "{{ prodqual_path_policy_render_path }}"
+    mode: "0600"
+  check_mode: true
+  when: prodqual_offline_mode | bool
+
+- name: Render authority launchd plists (offline check-only)
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ prodqual_authority_plist_dir }}/{{ item.label }}.plist"
+    mode: "{{ prodqual_launchd_plist_mode }}"
+  loop:
+    - src: ai.noesis.broker.plist.j2
+      label: ai.noesis.broker
+    - src: ai.noesis.orchestrator.plist.j2
+      label: ai.noesis.orchestrator
+    - src: ai.hermes.gateway.plist.j2
+      label: ai.hermes.gateway
+  check_mode: true
+  when: prodqual_offline_mode | bool
+
+- name: Render worker launchd plist (offline check-only)
+  ansible.builtin.template:
+    src: ai.openclaw.gateway.plist.j2
+    dest: "{{ prodqual_worker_plist_dir }}/ai.openclaw.gateway.plist"
+    mode: "{{ prodqual_launchd_plist_mode }}"
+  check_mode: true
+  when: prodqual_offline_mode | bool
+
+- name: Render authority launchd plists (apply, not loaded)
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ prodqual_authority_plist_dir }}/{{ item.label }}.plist"
+    owner: "{{ prodqual_launchd_plist_owner }}"
+    group: "{{ prodqual_launchd_plist_group }}"
+    mode: "{{ prodqual_launchd_plist_mode }}"
+  loop:
+    - src: ai.noesis.broker.plist.j2
+      label: ai.noesis.broker
+    - src: ai.noesis.orchestrator.plist.j2
+      label: ai.noesis.orchestrator
+    - src: ai.hermes.gateway.plist.j2
+      label: ai.hermes.gateway
+  when:
+    - prodqual_apply_authorized | bool
+    - not (prodqual_offline_mode | bool)
+
+- name: Render worker launchd plist (apply, not loaded)
+  ansible.builtin.template:
+    src: ai.openclaw.gateway.plist.j2
+    dest: "{{ prodqual_worker_plist_dir }}/ai.openclaw.gateway.plist"
+    owner: "{{ prodqual_launchd_plist_owner }}"
+    group: "{{ prodqual_launchd_plist_group }}"
+    mode: "{{ prodqual_launchd_plist_mode }}"
+  when:
+    - prodqual_apply_authorized | bool
+    - not (prodqual_offline_mode | bool)

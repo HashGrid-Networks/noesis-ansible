@@ -1,0 +1,53 @@
+---
+# Content-addressed backup plan. Does not copy bytes unless apply-authorized.
+
+- name: Render backup plan manifest
+  ansible.builtin.template:
+    src: backup-manifest.json.j2
+    dest: "{{ prodqual_backup_plan_render_path | default(prodqual_backup_root ~ '/backup-plan.json') }}"
+    mode: "0600"
+  check_mode: true
+  when: prodqual_offline_mode | bool
+
+- name: Fingerprint destinations and halt on unapproved drift (apply)
+  when:
+    - prodqual_apply_authorized | bool
+    - not (prodqual_offline_mode | bool)
+  block:
+    - name: Stat managed destinations
+      ansible.builtin.stat:
+        path: "{{ item }}"
+        get_checksum: true
+        checksum_algorithm: sha256
+      register: prodqual_dest_stats
+      loop:
+        - "{{ prodqual_manifest_path }}"
+        - "{{ prodqual_runtime_root }}"
+        - "{{ prodqual_authority_launchd_dir }}/ai.noesis.broker.plist"
+        - "{{ prodqual_authority_launchd_dir }}/ai.noesis.orchestrator.plist"
+        - "{{ prodqual_authority_launchd_dir }}/ai.hermes.gateway.plist"
+        - "{{ prodqual_worker_launchd_dir }}/ai.openclaw.gateway.plist"
+
+    - name: Halt on unrecognized destination that would be overwritten
+      ansible.builtin.assert:
+        that:
+          - (item.stat.exists | default(false)) == false or (item.stat.checksum | default('') in prodqual_recognized_checksums | default([])) or (item.stat.isdir | default(false))
+        fail_msg: "unrecognized destination drift, refusing overwrite: {{ item.item }}"
+      loop: "{{ prodqual_dest_stats.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Write content-addressed backup manifest (plan only unless authorized)
+      ansible.builtin.template:
+        src: backup-manifest.json.j2
+        dest: "{{ prodqual_backup_root }}/backup-plan.json"
+        owner: "{{ prodqual_authority_user }}"
+        group: "{{ prodqual_authority_group }}"
+        mode: "0600"
+
+- name: Worker remains denied from backup authority
+  ansible.builtin.assert:
+    that:
+      - prodqual_backup_dir_mode == '0700'
+      - prodqual_runtime_owner == 'noesis-authority'
+    fail_msg: "backup root must remain authority-owned mode 0700"

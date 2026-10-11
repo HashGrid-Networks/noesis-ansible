@@ -1,0 +1,52 @@
+---
+# Isolated offline fixture. Not production inventory. Not a physical host.
+# Simulated UniqueIDs exist only so fail-closed distinct-identity checks can run.
+
+deployment_env: prodqual-fixture
+ansible_python_interpreter: "{{ ansible_playbook_python }}"
+prodqual_offline_mode: true
+prodqual_apply_authorized: false
+prodqual_activation_authorized: false
+prodqual_canary_authorized: false
+prodqual_restore_authorized: false
+prodqual_fixture_identities: true
+
+prodqual_authority_uid: 901
+prodqual_worker_uid: 902
+prodqual_operator_uid: 501
+prodqual_operator_user: operator-fixture
+
+prodqual_path_prefix: "{{ inventory_dir }}/staging"
+prodqual_allowed_path_prefixes:
+  - "{{ inventory_dir }}/staging"
+prodqual_runtime_root: "{{ inventory_dir }}/staging/runtime"
+prodqual_manifest_path: "{{ inventory_dir }}/staging/authority/approved-release-manifest.json"
+prodqual_taskstore_root: "{{ inventory_dir }}/staging/authority/taskstore"
+prodqual_approval_store: "{{ inventory_dir }}/staging/authority/approvals"
+prodqual_backup_root: "{{ inventory_dir }}/staging/authority/backups"
+prodqual_authority_profile_root: "{{ inventory_dir }}/staging/authority/profiles"
+prodqual_worker_profile_root: "{{ inventory_dir }}/staging/worker/profiles"
+prodqual_worker_scratch_root: "{{ inventory_dir }}/staging/worker/scratch"
+prodqual_authority_credential_ref_root: "{{ inventory_dir }}/staging/authority/credential-refs"
+prodqual_authority_log_root: "{{ inventory_dir }}/staging/authority/logs"
+prodqual_worker_log_root: "{{ inventory_dir }}/staging/worker/logs"
+prodqual_authority_run_root: "{{ inventory_dir }}/staging/authority/run"
+prodqual_authority_launchd_dir: "{{ inventory_dir }}/staging/LaunchDaemons"
+prodqual_worker_launchd_dir: "{{ inventory_dir }}/staging/LaunchDaemons"
+prodqual_rollback_staging_root: "{{ inventory_dir }}/staging/authority/restore-staging"
+prodqual_hermes_gateway_socket: "{{ inventory_dir }}/staging/authority/run/hermes-gateway.sock"
+prodqual_broker_python: "{{ inventory_dir }}/staging/runtime/control-plane/python"
+prodqual_orchestrator_bin: "{{ inventory_dir }}/staging/runtime/control-plane/supervisor.py"
+prodqual_hermes_bin: "{{ inventory_dir }}/staging/runtime/bin/hermes"
+prodqual_openclaw_bin: "{{ inventory_dir }}/staging/runtime/bin/openclaw"
+
+prodqual_hardening_candidate_commit: "059c3b5bd80693205bd3e98dd916b650f98e82b8"
+prodqual_hardening_pin_status: unreviewed_pending_sentinel
+prodqual_runtime_payload_digest: "9450ccf6b4f84538e3b15053d9a2618011bd89c4e9a9aa0d287b41d88bd37425"
+prodqual_ansible_baseline_commit: "ffb1357d07ccdde0036c82acb47073b9d6770037"
+prodqual_agent_stack_commit: "60ff6377684b09bd2a12816e7ae1e1624fe602a1"
+prodqual_lease_candidate_commit: ""
+prodqual_lease_candidate_status: pending_successor_review
+
+prodqual_tailscale_bind_enabled: false
+prodqual_public_bind_enabled: false

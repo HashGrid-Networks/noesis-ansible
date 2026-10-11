@@ -1,0 +1,5 @@
+---
+# Later-executable rollback plan entry point. Offline-safe wrapper.
+
+- name: Import offline validation for rollback plan rendering
+  ansible.builtin.import_playbook: macos-prodqual-loopback-validate.yml

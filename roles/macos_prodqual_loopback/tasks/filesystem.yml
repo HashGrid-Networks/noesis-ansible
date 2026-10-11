@@ -1,0 +1,100 @@
+---
+# Later-approved filesystem boundary. Never run in offline validation.
+
+- name: Require apply authorization for filesystem mutation
+  ansible.builtin.assert:
+    that:
+      - prodqual_apply_authorized | bool
+      - not (prodqual_offline_mode | bool)
+      - prodqual_authority_uid | int > 0
+      - prodqual_worker_uid | int > 0
+    fail_msg: "filesystem tasks are apply-gated and require discovered UIDs"
+
+- name: Create authority-owned path classes
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ prodqual_authority_user }}"
+    group: "{{ prodqual_authority_group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ prodqual_runtime_root }}"
+      mode: "{{ prodqual_runtime_dir_mode }}"
+    - path: "{{ prodqual_manifest_path | dirname }}"
+      mode: "{{ prodqual_approval_dir_mode }}"
+    - path: "{{ prodqual_taskstore_root }}"
+      mode: "{{ prodqual_taskstore_dir_mode }}"
+    - path: "{{ prodqual_approval_store }}"
+      mode: "{{ prodqual_approval_dir_mode }}"
+    - path: "{{ prodqual_backup_root }}"
+      mode: "{{ prodqual_backup_dir_mode }}"
+    - path: "{{ prodqual_authority_profile_root }}"
+      mode: "{{ prodqual_authority_profile_dir_mode }}"
+    - path: "{{ prodqual_authority_credential_ref_root }}"
+      mode: "{{ prodqual_credential_ref_dir_mode }}"
+    - path: "{{ prodqual_authority_log_root }}"
+      mode: "{{ prodqual_log_dir_mode }}"
+    - path: "{{ prodqual_authority_run_root }}"
+      mode: "{{ prodqual_log_dir_mode }}"
+    - path: "{{ prodqual_rollback_staging_root }}"
+      mode: "{{ prodqual_backup_dir_mode }}"
+
+- name: Create worker-owned bounded path classes
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ prodqual_worker_user }}"
+    group: "{{ prodqual_worker_group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ prodqual_worker_profile_root }}"
+      mode: "{{ prodqual_worker_profile_dir_mode }}"
+    - path: "{{ prodqual_worker_scratch_root }}"
+      mode: "{{ prodqual_worker_profile_dir_mode }}"
+    - path: "{{ prodqual_worker_log_root }}"
+      mode: "{{ prodqual_log_dir_mode }}"
+
+- name: Verify worker write is denied on authority paths
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/su
+      - -s
+      - /bin/sh
+      - "{{ prodqual_worker_user }}"
+      - -c
+      - "touch '{{ item }}/.prodqual-worker-probe'"
+  register: prodqual_worker_denied
+  failed_when: prodqual_worker_denied.rc == 0
+  changed_when: false
+  loop:
+    - "{{ prodqual_runtime_root }}"
+    - "{{ prodqual_manifest_path | dirname }}"
+    - "{{ prodqual_taskstore_root }}"
+    - "{{ prodqual_approval_store }}"
+    - "{{ prodqual_backup_root }}"
+    - "{{ prodqual_authority_profile_root }}"
+    - "{{ prodqual_authority_credential_ref_root }}"
+    - "{{ prodqual_authority_launchd_dir }}"
+
+- name: Verify worker write is permitted on bounded worker paths
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/su
+      - -s
+      - /bin/sh
+      - "{{ prodqual_worker_user }}"
+      - -c
+      - "test -w '{{ item }}'"
+  register: prodqual_worker_allowed
+  failed_when: prodqual_worker_allowed.rc != 0
+  changed_when: false
+  loop:
+    - "{{ prodqual_worker_profile_root }}"
+    - "{{ prodqual_worker_scratch_root }}"
+    - "{{ prodqual_worker_log_root }}"
+
+- name: Verify UserName/mode are not treated as the full boundary
+  ansible.builtin.debug:
+    msg: >-
+      launchd UserName and file modes are necessary but not sufficient.
+      Worker write probes above are the boundary evidence.

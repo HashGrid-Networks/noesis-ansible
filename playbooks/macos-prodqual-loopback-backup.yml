@@ -1,0 +1,5 @@
+---
+# Later-executable backup plan entry point. Offline-safe wrapper.
+
+- name: Import offline validation for backup plan rendering
+  ansible.builtin.import_playbook: macos-prodqual-loopback-validate.yml

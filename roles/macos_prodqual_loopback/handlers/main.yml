@@ -1,0 +1,17 @@
+---
+# Handlers are activate-gated. Offline validation never notifies these.
+- name: Refuse unauthenticated launchd mutation
+  ansible.builtin.fail:
+    msg: >-
+      launchd mutation requires prodqual_apply_authorized=true and
+      prodqual_activation_authorized=true. Offline validation cannot load services.
+  listen: prodqual_load_authority_launchd
+  when: not (prodqual_apply_authorized | bool and prodqual_activation_authorized | bool)
+
+- name: Refuse unauthenticated worker launchd mutation
+  ansible.builtin.fail:
+    msg: >-
+      launchd mutation requires prodqual_apply_authorized=true and
+      prodqual_activation_authorized=true. Offline validation cannot load services.
+  listen: prodqual_load_worker_launchd
+  when: not (prodqual_apply_authorized | bool and prodqual_activation_authorized | bool)

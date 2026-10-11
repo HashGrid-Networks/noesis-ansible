@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.openclaw.gateway</string>
+  <key>UserName</key>
+  <string>{{ prodqual_worker_user }}</string>
+  <key>GroupName</key>
+  <string>{{ prodqual_worker_group }}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{ prodqual_openclaw_bin }}</string>
+    <string>gateway</string>
+    <string>--port</string>
+    <string>{{ prodqual_openclaw_bind_port }}</string>
+    <string>--host</string>
+    <string>{{ prodqual_openclaw_bind_host }}</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>{{ prodqual_throttle_interval_seconds }}</integer>
+  <key>ExitTimeOut</key>
+  <integer>{{ prodqual_exit_timeout_seconds }}</integer>
+  <key>StandardOutPath</key>
+  <string>{{ prodqual_worker_log_root }}/openclaw-gateway.log</string>
+  <key>StandardErrorPath</key>
+  <string>{{ prodqual_worker_log_root }}/openclaw-gateway.error.log</string>
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>

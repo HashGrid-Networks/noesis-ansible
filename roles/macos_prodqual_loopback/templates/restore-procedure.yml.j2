@@ -1,0 +1,14 @@
+---
+schema_version: noesis.prodqual.restore_procedure/v1
+order:
+  - fingerprint_live_destinations
+  - halt_on_unrecognized_drift
+  - restore_into_isolated_staging
+  - validate_staging_hashes_owners_modes
+  - require_restore_authorization
+  - copy_from_staging_only_if_recognized
+  - never_delete_unrecognized_destination
+isolated_staging_root: "{{ prodqual_rollback_staging_root }}"
+backup_root: "{{ prodqual_backup_root }}"
+worker_denied: true
+live_restore_authorized: {{ prodqual_restore_authorized | bool | lower }}

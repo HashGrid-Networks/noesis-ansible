@@ -1,0 +1,22 @@
+---
+schema_version: noesis.prodqual.path_policy/v1
+authority_user: {{ prodqual_authority_user }}
+worker_user: {{ prodqual_worker_user }}
+worker_write_denied:
+  - {{ prodqual_runtime_root }}
+  - {{ prodqual_manifest_path }}
+  - {{ prodqual_taskstore_root }}
+  - {{ prodqual_approval_store }}
+  - {{ prodqual_backup_root }}
+  - {{ prodqual_authority_profile_root }}
+  - {{ prodqual_authority_credential_ref_root }}
+  - {{ prodqual_authority_launchd_dir }}
+worker_write_permitted:
+  - {{ prodqual_worker_profile_root }}
+  - {{ prodqual_worker_scratch_root }}
+  - {{ prodqual_worker_log_root }}
+credential_refs:
+  store: {{ prodqual_authority_credential_refs.secret_store }}
+  broker_token_env: {{ prodqual_authority_credential_refs.broker_token_env }}
+  values_in_repo: false
+username_or_mode_insufficient: true

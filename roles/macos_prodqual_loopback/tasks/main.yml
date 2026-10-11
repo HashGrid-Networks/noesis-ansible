@@ -1,0 +1,46 @@
+---
+- name: Include prodqual preflight
+  ansible.builtin.include_tasks: preflight.yml
+  tags: [prodqual, preflight, offline, validate]
+
+- name: Include prodqual identity (apply-gated)
+  ansible.builtin.include_tasks: identity.yml
+  when:
+    - prodqual_apply_authorized | bool
+    - not (prodqual_offline_mode | bool)
+  tags: [prodqual, identity, apply]
+
+- name: Include prodqual filesystem (apply-gated)
+  ansible.builtin.include_tasks: filesystem.yml
+  when:
+    - prodqual_apply_authorized | bool
+    - not (prodqual_offline_mode | bool)
+  tags: [prodqual, filesystem, apply]
+
+- name: Include prodqual configure
+  ansible.builtin.include_tasks: configure.yml
+  tags: [prodqual, configure, offline]
+
+- name: Include prodqual backup plan
+  ansible.builtin.include_tasks: backup.yml
+  tags: [prodqual, backup, offline]
+
+- name: Include prodqual restore plan
+  ansible.builtin.include_tasks: restore.yml
+  tags: [prodqual, restore, offline]
+
+- name: Include prodqual rollback plan
+  ansible.builtin.include_tasks: rollback.yml
+  tags: [prodqual, rollback, offline]
+
+- name: Include prodqual validate
+  ansible.builtin.include_tasks: validate.yml
+  tags: [prodqual, validate, offline]
+
+- name: Include prodqual activation (separately gated)
+  ansible.builtin.include_tasks: activate.yml
+  when:
+    - prodqual_apply_authorized | bool
+    - prodqual_activation_authorized | bool
+    - not (prodqual_offline_mode | bool)
+  tags: [prodqual, activate, apply]

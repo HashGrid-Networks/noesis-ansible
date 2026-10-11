@@ -1,0 +1,75 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "noesis.approved_release_manifest/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "candidate_id",
+    "candidate_commit",
+    "runtime_payload_recipe_version",
+    "algorithm",
+    "bound_runtime_root",
+    "files",
+    "runtime_payload_digest"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "noesis.approved_release_manifest/v1"
+    },
+    "candidate_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "candidate_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "runtime_payload_recipe_version": {
+      "type": "string",
+      "const": "hardening-1-trusted-manifest-runtime/v1"
+    },
+    "algorithm": {
+      "type": "string",
+      "const": "SHA-256"
+    },
+    "concatenation": {
+      "type": "string"
+    },
+    "bound_runtime_root": {
+      "type": "string",
+      "pattern": "^/"
+    },
+    "tests_excluded": {
+      "type": "boolean"
+    },
+    "files": {
+      "type": "array",
+      "minItems": 8,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256"],
+        "properties": {
+          "path": { "type": "string" },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    "runtime_payload_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "pin_status": {
+      "type": "string"
+    },
+    "trust": {
+      "type": "object"
+    }
+  }
+}

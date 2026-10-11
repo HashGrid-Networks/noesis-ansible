@@ -1,0 +1,45 @@
+---
+# Restore is always staged first. Never mutates live destinations from offline mode.
+
+- name: Restore requires isolated staging
+  ansible.builtin.assert:
+    that:
+      - prodqual_rollback_staging_root | length > 0
+      - prodqual_rollback_staging_root != '/'
+      - prodqual_rollback_staging_root != '/Users'
+      - prodqual_rollback_staging_root != '/tmp'
+    fail_msg: "restore staging root is missing or unsafe"
+
+- name: Render restore procedure into backup root (offline check-only)
+  ansible.builtin.template:
+    src: restore-procedure.yml.j2
+    dest: "{{ prodqual_backup_root }}/restore-procedure.yml"
+    mode: "0600"
+  check_mode: true
+  when: prodqual_offline_mode | bool
+
+- name: Execute restore into isolated staging (apply)
+  when:
+    - prodqual_apply_authorized | bool
+    - prodqual_restore_authorized | bool
+    - not (prodqual_offline_mode | bool)
+  block:
+    - name: Ensure isolated restore staging exists
+      ansible.builtin.file:
+        path: "{{ prodqual_rollback_staging_root }}"
+        state: directory
+        owner: "{{ prodqual_authority_user }}"
+        group: "{{ prodqual_authority_group }}"
+        mode: "{{ prodqual_backup_dir_mode }}"
+
+    - name: Refuse restore that would skip staging validation
+      ansible.builtin.assert:
+        that:
+          - prodqual_rollback_staging_root != prodqual_runtime_root
+          - prodqual_rollback_staging_root != prodqual_backup_root
+        fail_msg: "restore staging must be distinct from runtime and backup roots"
+
+- name: Refuse live restore from offline or unauthorized runs
+  ansible.builtin.debug:
+    msg: "restore remains a later-executable plan; no destination bytes copied"
+  when: not (prodqual_restore_authorized | bool)

@@ -1,0 +1,94 @@
+---
+# Later-approved identity creation. Never run in offline validation.
+# UniqueIDs are assigned by the OS; this role does not pin numeric UIDs.
+
+- name: Require apply authorization for identity mutation
+  ansible.builtin.assert:
+    that:
+      - prodqual_apply_authorized | bool
+      - not (prodqual_offline_mode | bool)
+    fail_msg: "identity tasks are apply-gated and must not run offline"
+
+- name: Create authority group without pinned GID
+  ansible.builtin.group:
+    name: "{{ prodqual_authority_group }}"
+    system: true
+    state: present
+
+- name: Create worker group without pinned GID
+  ansible.builtin.group:
+    name: "{{ prodqual_worker_group }}"
+    system: true
+    state: present
+
+- name: Create unprivileged non-login authority user without pinned UID
+  ansible.builtin.user:
+    name: "{{ prodqual_authority_user }}"
+    group: "{{ prodqual_authority_group }}"
+    comment: "Noesis production-qualification authority"
+    shell: "{{ prodqual_authority_shell }}"
+    create_home: false
+    system: true
+    password: "!"
+    state: present
+
+- name: Create unprivileged non-login worker user without pinned UID
+  ansible.builtin.user:
+    name: "{{ prodqual_worker_user }}"
+    group: "{{ prodqual_worker_group }}"
+    comment: "Noesis production-qualification worker"
+    shell: "{{ prodqual_worker_shell }}"
+    create_home: false
+    system: true
+    password: "!"
+    state: present
+
+- name: Discover authority UniqueID
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/dscl
+      - .
+      - -read
+      - "/Users/{{ prodqual_authority_user }}"
+      - UniqueID
+  register: prodqual_authority_dscl
+  changed_when: false
+
+- name: Discover worker UniqueID
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/dscl
+      - .
+      - -read
+      - "/Users/{{ prodqual_worker_user }}"
+      - UniqueID
+  register: prodqual_worker_dscl
+  changed_when: false
+
+- name: Discover operator UniqueID
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/id
+      - -u
+  register: prodqual_operator_id
+  changed_when: false
+
+- name: Record discovered UniqueIDs
+  ansible.builtin.set_fact:
+    prodqual_authority_uid: "{{ prodqual_authority_dscl.stdout | regex_replace('^UniqueID:\\s*', '') | trim }}"
+    prodqual_worker_uid: "{{ prodqual_worker_dscl.stdout | regex_replace('^UniqueID:\\s*', '') | trim }}"
+    prodqual_operator_uid: "{{ prodqual_operator_id.stdout | trim }}"
+
+- name: Fail closed on equal or missing identities
+  ansible.builtin.assert:
+    that:
+      - prodqual_authority_uid | int != prodqual_worker_uid | int
+      - prodqual_authority_uid | int != prodqual_operator_uid | int
+      - prodqual_worker_uid | int != prodqual_operator_uid | int
+      - prodqual_authority_uid | int > 0
+      - prodqual_worker_uid | int > 0
+    fail_msg: >-
+      discovered UIDs are not distinct
+      (authority={{ prodqual_authority_uid }},
+      worker={{ prodqual_worker_uid }},
+      operator={{ prodqual_operator_uid }})
