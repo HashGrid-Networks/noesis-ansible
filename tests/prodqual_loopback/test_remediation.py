@@ -6,14 +6,18 @@ Stdlib + PyYAML/jinja2 only. Never mutates system paths, launchd, or identities.
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 import re
+import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 try:
     import yaml
@@ -177,10 +181,18 @@ class DarwinIdentityPrivilegeTests(unittest.TestCase):
 
     def test_filesystem_probe_is_darwin_python_setuid_not_su_dash_s(self):
         filesystem = (ROLE / "tasks" / "filesystem.yml").read_text(encoding="utf-8")
+        probe_path = ROLE / "files" / "worker_write_probe.py"
+        self.assertTrue(probe_path.is_file(), msg="managed worker probe file is required")
+        probe = probe_path.read_text(encoding="utf-8")
         self.assertNotIn("/usr/bin/su", filesystem)
         self.assertNotIn("-s", filesystem)
         self.assertIn("/usr/bin/python3", filesystem)
-        self.assertIn("os.setuid", filesystem)
+        self.assertNotIn("os.setuid", filesystem)
+        self.assertNotIn("python3 -c", filesystem)
+        self.assertIn("os.setgid(gid)", probe)
+        self.assertIn("os.setuid(uid)", probe)
+        self.assertIn("os.getuid()", probe)
+        self.assertIn("os.getgid()", probe)
         for path_token in (
             "prodqual_authority_log_root",
             "prodqual_rollback_staging_root",
@@ -937,6 +949,273 @@ class CheckModeIdentityDiscoveryTests(unittest.TestCase):
         self.assertIn("authority_uid is required", failed_errors)
         self.assertIn("worker_uid is required", failed_errors)
         self.assertIn("operator_uid is required", failed_errors)
+
+
+WORKER_PROBE = ROLE / "files" / "worker_write_probe.py"
+WORKER_PROBE_ARGV = [
+    "/usr/bin/python3",
+    "{{ role_path }}/files/worker_write_probe.py",
+    "{{ prodqual_worker_uid | string }}",
+    "{{ prodqual_worker_gid | string }}",
+    "{{ item }}",
+]
+
+
+def _run_probe(target_dir, uid=None, gid=None):
+    """Execute the managed probe against a disposable directory via /usr/bin/python3."""
+    if uid is None:
+        uid = os.getuid()
+    if gid is None:
+        gid = os.getgid()
+    completed = subprocess.run(
+        [
+            "/usr/bin/python3",
+            str(WORKER_PROBE),
+            str(uid),
+            str(gid),
+            str(target_dir),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return completed.returncode, completed.stdout, completed.stderr
+
+
+def _load_probe_module():
+    spec = importlib.util.spec_from_file_location(
+        "prodqual_worker_write_probe", WORKER_PROBE
+    )
+    if spec is None or spec.loader is None:
+        raise AssertionError("unable to load worker_write_probe.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _probe_files(root):
+    return sorted(Path(root).glob(".prodqual-worker-probe-*"))
+
+
+class WorkerIsolationProbeTests(unittest.TestCase):
+    def test_both_probe_tasks_invoke_managed_probe_via_argv(self):
+        filesystem = load_yaml(ROLE / "tasks" / "filesystem.yml")
+        filesystem_src = (ROLE / "tasks" / "filesystem.yml").read_text(encoding="utf-8")
+        self.assertNotIn("python3 -c", filesystem_src)
+        self.assertNotRegex(filesystem_src, r"(?m)^\s+- -c\s*$")
+        for name in (
+            "Verify worker write is denied on authority paths",
+            "Verify worker write is permitted on bounded worker paths",
+        ):
+            task = _named_task(filesystem, name)
+            command = task.get("ansible.builtin.command") or {}
+            argv = command.get("argv") or []
+            self.assertEqual(argv, WORKER_PROBE_ARGV, msg=name)
+            self.assertEqual(len(argv), 5, msg=name)
+            self.assertEqual(argv[0], "/usr/bin/python3", msg=name)
+            self.assertNotIn("-c", argv)
+            self.assertIs(task.get("become"), True, msg=name)
+            self.assertIs(task.get("changed_when"), False, msg=name)
+
+    def test_probe_source_has_single_open_gate_and_rc13_mapping(self):
+        """Ansible argv / YAML / interpreter smoke plus Option B source shape."""
+        self.assertTrue(WORKER_PROBE.is_file())
+        source = WORKER_PROBE.read_text(encoding="utf-8")
+        self.assertNotIn("os.path.isdir(", source)
+        self.assertNotIn("os.lstat(probe_path)", source)
+        self.assertEqual(source.count("os.open("), 1)
+        self.assertIn("except PermissionError as exc:", source)
+        self.assertIn("errno.EACCES", source)
+        self.assertIn("errno.EPERM", source)
+        self.assertIn("return _fail(13, probe_path, exc)", source)
+        filesystem = load_yaml(ROLE / "tasks" / "filesystem.yml")
+        deny = _named_task(filesystem, "Verify worker write is denied on authority paths")
+        allow = _named_task(
+            filesystem, "Verify worker write is permitted on bounded worker paths"
+        )
+        deny_argv = (deny.get("ansible.builtin.command") or {}).get("argv") or []
+        allow_argv = (allow.get("ansible.builtin.command") or {}).get("argv") or []
+        self.assertEqual(deny_argv[0], "/usr/bin/python3")
+        self.assertEqual(allow_argv[0], "/usr/bin/python3")
+        self.assertEqual(len(deny_argv), 5)
+        self.assertEqual(len(allow_argv), 5)
+        self.assertIn("worker_write_probe.py", deny_argv[1])
+        self.assertIn("worker_write_probe.py", allow_argv[1])
+
+    def test_filesystem_yml_privileged_validation_tasks_exist(self):
+        filesystem = load_yaml(ROLE / "tasks" / "filesystem.yml")
+        authority = _named_task(filesystem, "Validate authority path integrity")
+        worker = _named_task(filesystem, "Validate worker path integrity")
+        self.assertIn("ansible.builtin.stat", authority)
+        self.assertIn("ansible.builtin.stat", worker)
+        self.assertIs(authority.get("ansible.builtin.stat", {}).get("follow"), False)
+        self.assertIs(worker.get("ansible.builtin.stat", {}).get("follow"), False)
+        deny = _named_task(filesystem, "Verify worker write is denied on authority paths")
+        allow = _named_task(
+            filesystem, "Verify worker write is permitted on bounded worker paths"
+        )
+        deny_argv = (deny.get("ansible.builtin.command") or {}).get("argv") or []
+        allow_argv = (allow.get("ansible.builtin.command") or {}).get("argv") or []
+        self.assertEqual(len(deny_argv), 5)
+        self.assertEqual(len(allow_argv), 5)
+        self.assertTrue(
+            any("worker_write_probe.py" in str(part) for part in deny_argv)
+        )
+        self.assertTrue(
+            any("worker_write_probe.py" in str(part) for part in allow_argv)
+        )
+
+    def test_run_probe_negative_control_temp_dirs(self):
+        """chmod 0555 write-deny and chmod 0000 execute-deny parents are rc 13."""
+        uid = os.getuid()
+        gid = os.getgid()
+        tmp = tempfile.mkdtemp(prefix="prodqual-worker-probe-")
+        writable = os.path.join(tmp, "writable")
+        denied = os.path.join(tmp, "denied")
+        owner_000 = os.path.join(tmp, "owner_000")
+        missing = os.path.join(tmp, "missing")
+        try:
+            os.mkdir(writable)
+            os.mkdir(denied)
+            os.mkdir(owner_000)
+            os.chmod(denied, 0o555)
+            os.chmod(owner_000, 0o000)
+            rc0, out0, err0 = _run_probe(writable, uid=uid, gid=gid)
+            self.assertEqual(rc0, 0, msg="stdout=%r stderr=%r" % (out0, err0))
+            self.assertEqual(_probe_files(writable), [])
+            rc13, out13, err13 = _run_probe(denied, uid=uid, gid=gid)
+            self.assertEqual(rc13, 13, msg="stdout=%r stderr=%r" % (out13, err13))
+            self.assertEqual(_probe_files(denied), [])
+            rc_000, out_000, err_000 = _run_probe(owner_000, uid=uid, gid=gid)
+            self.assertEqual(
+                rc_000, 13, msg="stdout=%r stderr=%r" % (out_000, err_000)
+            )
+            self.assertEqual(_probe_files(owner_000), [])
+            rc_missing, out_m, err_m = _run_probe(missing, uid=uid, gid=gid)
+            self.assertEqual(
+                rc_missing,
+                2,
+                msg="missing target is os.open ENOENT -> rc 2; stdout=%r stderr=%r"
+                % (out_m, err_m),
+            )
+        finally:
+            os.chmod(denied, 0o755)
+            os.chmod(owner_000, 0o755)
+            shutil.rmtree(tmp)
+
+    def test_writable_disposable_directory_is_rc_0(self):
+        """Allow-axis positive: writable tmp is isolation-success rc 0, not rc 13."""
+        uid = os.getuid()
+        gid = os.getgid()
+        with tempfile.TemporaryDirectory(prefix="prodqual-worker-probe-allow-") as tmp:
+            rc, out, err = _run_probe(tmp, uid=uid, gid=gid)
+            self.assertEqual(rc, 0, msg="stdout=%r stderr=%r" % (out, err))
+            self.assertEqual(_probe_files(tmp), [])
+
+    def test_missing_target_is_rc_2(self):
+        """Missing target: os.open raises OSError ENOENT, mapped to rc 2 not rc 3."""
+        uid = os.getuid()
+        gid = os.getgid()
+        missing = os.path.join(
+            tempfile.gettempdir(), "prodqual-worker-probe-missing-%d" % os.getpid()
+        )
+        self.assertFalse(os.path.exists(missing))
+        rc, out, err = _run_probe(missing, uid=uid, gid=gid)
+        self.assertEqual(rc, 2, msg="stdout=%r stderr=%r" % (out, err))
+
+    def test_wrong_worker_identity_is_rc_3(self):
+        """Non-root cannot setuid(0)/setgid(0); PermissionError maps to rc 3.
+
+        This process cannot drop privileges to a foreign uid. Passing uid=0
+        gid=0 exercises the setuid/setgid failure path, not post-setuid mismatch.
+        """
+        self.assertNotEqual(os.getuid(), 0)
+        with tempfile.TemporaryDirectory(prefix="prodqual-worker-probe-id-") as tmp:
+            rc, out, err = _run_probe(tmp, uid=0, gid=0)
+            self.assertEqual(rc, 3, msg="stdout=%r stderr=%r" % (out, err))
+            self.assertIn("rc=3", err)
+
+    def test_parent_traversal_deny_foreign_owner_returns_rc_13(self):
+        """R6-F1 real syscalls: 0700 parent owned by another uid, 0755 child.
+
+        Skip when this process is not root and cannot chown to synthetic uid
+        65534. Root is also skipped because DAC override would not deny the
+        open. The same-uid chmod 0000 analog is always executed in
+        test_parent_execute_denied_nested_target_is_rc_13.
+        """
+        if os.getuid() == 0:
+            self.skipTest(
+                "effective root: DAC override would not deny 0700 parent traversal"
+            )
+        with tempfile.TemporaryDirectory(prefix="prodqual-worker-probe-trav-") as tmp:
+            parent = Path(tmp) / "perm-0700"
+            target = parent / "target"
+            parent.mkdir()
+            target.mkdir()
+            os.chmod(target, 0o755)
+            os.chmod(parent, 0o700)
+            try:
+                os.chown(str(parent), 65534, -1)
+            except OSError as exc:
+                self.skipTest(
+                    "cannot chown parent to synthetic uid 65534: %s" % exc
+                )
+            rc, out, err = _run_probe(str(target), uid=os.getuid(), gid=os.getgid())
+            self.assertEqual(rc, 13, msg="stdout=%r stderr=%r" % (out, err))
+
+    def test_parent_execute_denied_nested_target_is_rc_13(self):
+        """R6-F1: chmod 0000 parent wrapping 0755 target; no isdir/lstat/open mocks."""
+        uid = os.getuid()
+        gid = os.getgid()
+        tmp = tempfile.mkdtemp(prefix="prodqual-worker-probe-nested-")
+        parent = os.path.join(tmp, "perm-0700")
+        target = os.path.join(parent, "target")
+        try:
+            os.mkdir(parent)
+            os.mkdir(target)
+            os.chmod(target, 0o755)
+            os.chmod(parent, 0o000)
+            rc, out, err = _run_probe(target, uid=uid, gid=gid)
+            self.assertEqual(rc, 13, msg="stdout=%r stderr=%r" % (out, err))
+            self.assertNotEqual(rc, 2)
+            self.assertNotEqual(rc, 3)
+        finally:
+            os.chmod(parent, 0o755)
+            self.assertEqual(_probe_files(target), [])
+            shutil.rmtree(tmp)
+
+    def test_probe_cleanup_unlinks_temporary_file(self):
+        module = _load_probe_module()
+        tmp = tempfile.mkdtemp(prefix="prodqual-worker-probe-unlink-")
+        try:
+            self.assertEqual(_probe_files(tmp), [])
+            seen = []
+            real_unlink = module.os.unlink
+
+            def tracking_unlink(path):
+                seen.append(path)
+                return real_unlink(path)
+
+            with mock.patch.object(module.sys, "executable", "/usr/bin/python3"):
+                with mock.patch.object(
+                    module.os, "unlink", side_effect=tracking_unlink
+                ):
+                    rc = module.main(
+                        [
+                            str(WORKER_PROBE),
+                            str(os.getuid()),
+                            str(os.getgid()),
+                            tmp,
+                        ]
+                    )
+            self.assertEqual(rc, 0, msg="unlink tracking probe rc=%s seen=%r" % (rc, seen))
+            self.assertEqual(len(seen), 1)
+            self.assertTrue(
+                os.path.basename(seen[0]).startswith(".prodqual-worker-probe-")
+            )
+            self.assertEqual(_probe_files(tmp), [])
+        finally:
+            shutil.rmtree(tmp)
 
 
 if __name__ == "__main__":

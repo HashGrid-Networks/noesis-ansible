@@ -65,17 +65,111 @@
     - path: "{{ prodqual_worker_log_root }}"
       mode: "{{ prodqual_log_dir_mode }}"
 
+- name: Validate authority path integrity
+  become: true
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+    follow: false
+  register: prodqual_authority_path_stat
+  changed_when: false
+  loop:
+    - path: "{{ prodqual_runtime_root }}"
+      owner: "{{ prodqual_authority_user }}"
+      group: "{{ prodqual_authority_group }}"
+      mode: "{{ prodqual_runtime_dir_mode }}"
+    - path: "{{ prodqual_manifest_path | dirname }}"
+      owner: "{{ prodqual_authority_user }}"
+      group: "{{ prodqual_authority_group }}"
+      mode: "{{ prodqual_approval_dir_mode }}"
+    - path: "{{ prodqual_taskstore_root }}"
+      owner: "{{ prodqual_authority_user }}"
+      group: "{{ prodqual_authority_group }}"
+      mode: "{{ prodqual_taskstore_dir_mode }}"
+    - path: "{{ prodqual_approval_store }}"
+      owner: "{{ prodqual_authority_user }}"
+      group: "{{ prodqual_authority_group }}"
+      mode: "{{ prodqual_approval_dir_mode }}"
+    - path: "{{ prodqual_backup_root }}"
+      owner: "{{ prodqual_authority_user }}"
+      group: "{{ prodqual_authority_group }}"
+      mode: "{{ prodqual_backup_dir_mode }}"
+    - path: "{{ prodqual_authority_profile_root }}"
+      owner: "{{ prodqual_authority_user }}"
+      group: "{{ prodqual_authority_group }}"
+      mode: "{{ prodqual_authority_profile_dir_mode }}"
+    - path: "{{ prodqual_authority_credential_ref_root }}"
+      owner: "{{ prodqual_authority_user }}"
+      group: "{{ prodqual_authority_group }}"
+      mode: "{{ prodqual_credential_ref_dir_mode }}"
+    - path: "{{ prodqual_authority_launchd_dir }}"
+      owner: "{{ prodqual_authority_user }}"
+      group: "{{ prodqual_authority_group }}"
+      mode: "{{ prodqual_log_dir_mode }}"
+    - path: "{{ prodqual_authority_log_root }}"
+      owner: "{{ prodqual_authority_user }}"
+      group: "{{ prodqual_authority_group }}"
+      mode: "{{ prodqual_log_dir_mode }}"
+    - path: "{{ prodqual_rollback_staging_root }}"
+      owner: "{{ prodqual_authority_user }}"
+      group: "{{ prodqual_authority_group }}"
+      mode: "{{ prodqual_backup_dir_mode }}"
+
+- name: Assert authority path integrity
+  become: true
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isdir
+      - item.stat.pw_name == item.item.owner
+      - item.stat.gr_name == item.item.group
+      - (("0000" ~ (item.stat.mode | string | regex_replace('[^0-7]', '')))[-4:]) == (("0000" ~ (item.item.mode | string | regex_replace('[^0-7]', '')))[-4:])
+    fail_msg: "authority path integrity failed closed for {{ item.item.path }}"
+  loop: "{{ prodqual_authority_path_stat.results }}"
+  changed_when: false
+
+- name: Validate worker path integrity
+  become: true
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+    follow: false
+  register: prodqual_worker_path_stat
+  changed_when: false
+  loop:
+    - path: "{{ prodqual_worker_profile_root }}"
+      owner: "{{ prodqual_worker_user }}"
+      group: "{{ prodqual_worker_group }}"
+      mode: "{{ prodqual_worker_profile_dir_mode }}"
+    - path: "{{ prodqual_worker_scratch_root }}"
+      owner: "{{ prodqual_worker_user }}"
+      group: "{{ prodqual_worker_group }}"
+      mode: "{{ prodqual_worker_profile_dir_mode }}"
+    - path: "{{ prodqual_worker_log_root }}"
+      owner: "{{ prodqual_worker_user }}"
+      group: "{{ prodqual_worker_group }}"
+      mode: "{{ prodqual_log_dir_mode }}"
+
+- name: Assert worker path integrity
+  become: true
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isdir
+      - item.stat.pw_name == item.item.owner
+      - item.stat.gr_name == item.item.group
+      - (("0000" ~ (item.stat.mode | string | regex_replace('[^0-7]', '')))[-4:]) == (("0000" ~ (item.item.mode | string | regex_replace('[^0-7]', '')))[-4:])
+    fail_msg: "worker path integrity failed closed for {{ item.item.path }}"
+  loop: "{{ prodqual_worker_path_stat.results }}"
+  changed_when: false
+
 - name: Verify worker write is denied on authority paths
   become: true
   ansible.builtin.command:
     argv:
       - /usr/bin/python3
-      - -c
-      - import os, sys; uid=int(sys.argv[1]); gid=int(sys.argv[2]); path=sys.argv[3]; os.setgid(gid); os.setuid(uid);
-        exec("try:\\n os.close(os.open(path, os.O_WRONLY|os.O_CREAT|os.O_EXCL, 0o600)); os.unlink(path); sys.exit(0)\\nexcept PermissionError:\\n sys.exit(13)\\nexcept OSError as exc:\\n sys.exit(13 if exc.errno in (1, 13) else 2)")
+      - "{{ role_path }}/files/worker_write_probe.py"
       - "{{ prodqual_worker_uid | string }}"
       - "{{ prodqual_worker_gid | string }}"
-      - "{{ item }}/.prodqual-worker-probe"
+      - "{{ item }}"
   register: prodqual_worker_denied
   failed_when: (prodqual_worker_denied.rc | prodqual_interpret_worker_probe(True) | length) > 0
   changed_when: false
@@ -96,12 +190,10 @@
   ansible.builtin.command:
     argv:
       - /usr/bin/python3
-      - -c
-      - import os, sys; uid=int(sys.argv[1]); gid=int(sys.argv[2]); path=sys.argv[3]; os.setgid(gid); os.setuid(uid);
-        exec("try:\\n os.close(os.open(path, os.O_WRONLY|os.O_CREAT|os.O_EXCL, 0o600)); os.unlink(path); sys.exit(0)\\nexcept PermissionError:\\n sys.exit(13)\\nexcept OSError as exc:\\n sys.exit(13 if exc.errno in (1, 13) else 2)")
+      - "{{ role_path }}/files/worker_write_probe.py"
       - "{{ prodqual_worker_uid | string }}"
       - "{{ prodqual_worker_gid | string }}"
-      - "{{ item }}/.prodqual-worker-probe"
+      - "{{ item }}"
   register: prodqual_worker_allowed
   failed_when: (prodqual_worker_allowed.rc | prodqual_interpret_worker_probe(False) | length) > 0
   changed_when: false
