@@ -66,6 +66,7 @@
       mode: "{{ prodqual_log_dir_mode }}"
 
 - name: Validate authority path integrity
+  when: not (ansible_check_mode | bool)
   become: true
   ansible.builtin.stat:
     path: "{{ item.path }}"
@@ -115,6 +116,7 @@
       mode: "{{ prodqual_backup_dir_mode }}"
 
 - name: Assert authority path integrity
+  when: not (ansible_check_mode | bool)
   become: true
   ansible.builtin.assert:
     that:
@@ -128,6 +130,7 @@
   changed_when: false
 
 - name: Validate worker path integrity
+  when: not (ansible_check_mode | bool)
   become: true
   ansible.builtin.stat:
     path: "{{ item.path }}"
@@ -149,6 +152,7 @@
       mode: "{{ prodqual_log_dir_mode }}"
 
 - name: Assert worker path integrity
+  when: not (ansible_check_mode | bool)
   become: true
   ansible.builtin.assert:
     that:

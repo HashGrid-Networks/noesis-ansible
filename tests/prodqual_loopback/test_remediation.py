@@ -1050,6 +1050,18 @@ class WorkerIsolationProbeTests(unittest.TestCase):
         self.assertIn("ansible.builtin.stat", worker)
         self.assertIs(authority.get("ansible.builtin.stat", {}).get("follow"), False)
         self.assertIs(worker.get("ansible.builtin.stat", {}).get("follow"), False)
+        for name in (
+            "Validate authority path integrity",
+            "Assert authority path integrity",
+            "Validate worker path integrity",
+            "Assert worker path integrity",
+        ):
+            task = _named_task(filesystem, name)
+            guard = task.get("when")
+            self.assertIsInstance(guard, str, msg=name)
+            self.assertIn("ansible_check_mode", guard, msg=name)
+            self.assertIn("not", guard, msg=name)
+            self.assertEqual(guard, "not (ansible_check_mode | bool)", msg=name)
         deny = _named_task(filesystem, "Verify worker write is denied on authority paths")
         allow = _named_task(
             filesystem, "Verify worker write is permitted on bounded worker paths"
@@ -1063,6 +1075,70 @@ class WorkerIsolationProbeTests(unittest.TestCase):
         )
         self.assertTrue(
             any("worker_write_probe.py" in str(part) for part in allow_argv)
+        )
+
+    def test_check_mode_skips_stat_assert_integrity_blocks(self):
+        filesystem = load_yaml(ROLE / "tasks" / "filesystem.yml")
+        for name in (
+            "Validate authority path integrity",
+            "Assert authority path integrity",
+            "Validate worker path integrity",
+            "Assert worker path integrity",
+        ):
+            task = _named_task(filesystem, name)
+            guard = task.get("when")
+            self.assertIsNotNone(guard, msg=name)
+            self.assertIn("ansible_check_mode", str(guard), msg=name)
+            self.assertEqual(str(guard), "not (ansible_check_mode | bool)", msg=name)
+
+    def test_live_mode_keeps_stat_assert_integrity_blocks_enabled(self):
+        filesystem = load_yaml(ROLE / "tasks" / "filesystem.yml")
+        for name in (
+            "Validate authority path integrity",
+            "Assert authority path integrity",
+            "Validate worker path integrity",
+            "Assert worker path integrity",
+        ):
+            guard = str(_named_task(filesystem, name).get("when") or "")
+            self.assertIn("ansible_check_mode", guard, msg=name)
+            self.assertRegex(guard, r"^not\s*\(")
+            self.assertNotIn("false", guard.lower(), msg=name)
+            self.assertNotIn("never", guard.lower(), msg=name)
+
+    def test_probe_and_create_loops_preserve_parent_shape(self):
+        filesystem_src = (ROLE / "tasks" / "filesystem.yml").read_text(encoding="utf-8")
+        self.assertEqual(filesystem_src.count("{{ role_path }}/files/worker_write_probe.py"), 2)
+        filesystem = load_yaml(ROLE / "tasks" / "filesystem.yml")
+        for name in (
+            "Verify worker write is denied on authority paths",
+            "Verify worker write is permitted on bounded worker paths",
+        ):
+            task = _named_task(filesystem, name)
+            command = task.get("ansible.builtin.command") or {}
+            self.assertEqual(command.get("argv"), WORKER_PROBE_ARGV, msg=name)
+            self.assertEqual(len(command.get("argv") or []), 5, msg=name)
+        self.assertEqual(
+            _named_task(filesystem, "Create authority-owned path classes").get("loop"),
+            [
+                {"path": "{{ prodqual_runtime_root }}", "mode": "{{ prodqual_runtime_dir_mode }}"},
+                {"path": "{{ prodqual_manifest_path | dirname }}", "mode": "{{ prodqual_approval_dir_mode }}"},
+                {"path": "{{ prodqual_taskstore_root }}", "mode": "{{ prodqual_taskstore_dir_mode }}"},
+                {"path": "{{ prodqual_approval_store }}", "mode": "{{ prodqual_approval_dir_mode }}"},
+                {"path": "{{ prodqual_backup_root }}", "mode": "{{ prodqual_backup_dir_mode }}"},
+                {"path": "{{ prodqual_authority_profile_root }}", "mode": "{{ prodqual_authority_profile_dir_mode }}"},
+                {"path": "{{ prodqual_authority_credential_ref_root }}", "mode": "{{ prodqual_credential_ref_dir_mode }}"},
+                {"path": "{{ prodqual_authority_log_root }}", "mode": "{{ prodqual_log_dir_mode }}"},
+                {"path": "{{ prodqual_authority_run_root }}", "mode": "{{ prodqual_log_dir_mode }}"},
+                {"path": "{{ prodqual_rollback_staging_root }}", "mode": "{{ prodqual_backup_dir_mode }}"},
+            ],
+        )
+        self.assertEqual(
+            _named_task(filesystem, "Create worker-owned bounded path classes").get("loop"),
+            [
+                {"path": "{{ prodqual_worker_profile_root }}", "mode": "{{ prodqual_worker_profile_dir_mode }}"},
+                {"path": "{{ prodqual_worker_scratch_root }}", "mode": "{{ prodqual_worker_profile_dir_mode }}"},
+                {"path": "{{ prodqual_worker_log_root }}", "mode": "{{ prodqual_log_dir_mode }}"},
+            ],
         )
 
     def test_run_probe_negative_control_temp_dirs(self):
