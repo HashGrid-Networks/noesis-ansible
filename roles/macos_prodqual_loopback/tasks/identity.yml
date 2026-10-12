@@ -111,6 +111,7 @@
       - UniqueID
   register: prodqual_authority_dscl
   changed_when: false
+  check_mode: false
 
 - name: Discover worker UniqueID
   ansible.builtin.command:
@@ -122,6 +123,7 @@
       - UniqueID
   register: prodqual_worker_dscl
   changed_when: false
+  check_mode: false
 
 - name: Discover worker PrimaryGroupID
   ansible.builtin.command:
@@ -133,6 +135,7 @@
       - PrimaryGroupID
   register: prodqual_worker_gid_dscl
   changed_when: false
+  check_mode: false
 
 - name: Discover operator UniqueID
   ansible.builtin.command:
@@ -141,6 +144,7 @@
       - -u
   register: prodqual_operator_id
   changed_when: false
+  check_mode: false
 
 - name: Record discovered UniqueIDs
   ansible.builtin.set_fact:

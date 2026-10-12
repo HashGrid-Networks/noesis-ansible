@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import stat
 import sys
 import tempfile
@@ -787,6 +788,155 @@ class PrivilegedFactGatheringInvocationTests(unittest.TestCase):
             text = (ROLE / "tasks" / rel).read_text(encoding="utf-8")
             self.assertIn("become: true", text, msg=rel)
             self.assertIn("ansible_effective_user_id | int == 0", text, msg=rel)
+
+
+IDENTITY_DISCOVERY_SPECS = (
+    (
+        "Discover authority UniqueID",
+        ["/usr/bin/dscl", ".", "-read", "/Users/{{ prodqual_authority_user }}", "UniqueID"],
+        "prodqual_authority_dscl",
+        "prodqual_authority_uid",
+        r"^UniqueID:\s*",
+    ),
+    (
+        "Discover worker UniqueID",
+        ["/usr/bin/dscl", ".", "-read", "/Users/{{ prodqual_worker_user }}", "UniqueID"],
+        "prodqual_worker_dscl",
+        "prodqual_worker_uid",
+        r"^UniqueID:\s*",
+    ),
+    (
+        "Discover worker PrimaryGroupID",
+        ["/usr/bin/dscl", ".", "-read", "/Groups/{{ prodqual_worker_group }}", "PrimaryGroupID"],
+        "prodqual_worker_gid_dscl",
+        "prodqual_worker_gid",
+        r"^PrimaryGroupID:\s*",
+    ),
+    (
+        "Discover operator UniqueID",
+        ["/usr/bin/id", "-u"],
+        "prodqual_operator_id",
+        "prodqual_operator_uid",
+        None,
+    ),
+)
+
+
+def _parse_discovery_stdout(stdout, strip_prefix):
+    text = "" if stdout is None else str(stdout)
+    if strip_prefix:
+        text = re.sub(strip_prefix, "", text)
+    return text.strip()
+
+
+def _facts_from_discovery_stdout(stdout_by_task):
+    facts = {}
+    for name, _argv, _register, fact_key, strip_prefix in IDENTITY_DISCOVERY_SPECS:
+        facts[fact_key] = _parse_discovery_stdout(stdout_by_task.get(name), strip_prefix)
+    return facts
+
+
+def _full_policy_from_discovered_facts(facts):
+    return prodqual_policy_errors(
+        valid_config(
+            authority_uid=facts["prodqual_authority_uid"],
+            worker_uid=facts["prodqual_worker_uid"],
+            operator_uid=facts["prodqual_operator_uid"],
+            policy_phase="full",
+        )
+    )
+
+
+class CheckModeIdentityDiscoveryTests(unittest.TestCase):
+    def test_four_identity_discovery_tasks_run_read_only_in_check_mode(self):
+        identity = load_yaml(ROLE / "tasks" / "identity.yml")
+        identity_src = (ROLE / "tasks" / "identity.yml").read_text(encoding="utf-8")
+        record = _named_task(identity, "Record discovered UniqueIDs")
+        recorded = record.get("ansible.builtin.set_fact") or {}
+        for name, argv, register, fact_key, strip_prefix in IDENTITY_DISCOVERY_SPECS:
+            task = _named_task(identity, name)
+            command = task.get("ansible.builtin.command") or {}
+            self.assertEqual(command.get("argv"), argv, msg=name)
+            self.assertIs(task.get("changed_when"), False, msg=name)
+            self.assertIs(task.get("check_mode"), False, msg=name)
+            self.assertEqual(task.get("register"), register, msg=name)
+            self.assertNotEqual(task.get("become"), True, msg=name)
+            self.assertIn(register + ".stdout", identity_src)
+            self.assertIn(fact_key + ":", identity_src)
+            self.assertIn(register + ".stdout", recorded.get(fact_key, ""))
+            if strip_prefix:
+                self.assertRegex(recorded.get(fact_key, ""), r"regex_replace\('%s'" % re.escape(strip_prefix))
+            else:
+                self.assertIn("%s.stdout | trim" % register, recorded.get(fact_key, ""))
+        operator = _named_task(identity, "Discover operator UniqueID")
+        self.assertNotIn("become", operator)
+        self.assertIn("prodqual_worker_gid | int > 0", (ROLE / "tasks" / "filesystem.yml").read_text(encoding="utf-8"))
+
+    def test_discovered_command_stdout_feeds_full_identity_validation(self):
+        facts = _facts_from_discovery_stdout(
+            {
+                "Discover authority UniqueID": "UniqueID: 443",
+                "Discover worker UniqueID": "UniqueID: 444",
+                "Discover worker PrimaryGroupID": "PrimaryGroupID: 443",
+                "Discover operator UniqueID": "501",
+            }
+        )
+        self.assertEqual(facts["prodqual_authority_uid"], "443")
+        self.assertEqual(facts["prodqual_worker_uid"], "444")
+        self.assertEqual(facts["prodqual_worker_gid"], "443")
+        self.assertEqual(facts["prodqual_operator_uid"], "501")
+        self.assertGreater(int(facts["prodqual_worker_gid"]), 0)
+        errors = _full_policy_from_discovered_facts(facts)
+        self.assertFalse(any("uid" in item.lower() for item in errors), msg=errors)
+        identity_errors = _require(prodqual_identity_policy_errors, "prodqual_identity_policy_errors")(
+            {
+                "authority_uid": facts["prodqual_authority_uid"],
+                "worker_uid": facts["prodqual_worker_uid"],
+                "operator_uid": facts["prodqual_operator_uid"],
+            }
+        )
+        self.assertEqual(identity_errors, [])
+
+    def test_missing_malformed_or_failed_discovery_fail_closed(self):
+        skipped = _facts_from_discovery_stdout({})
+        self.assertEqual(skipped["prodqual_authority_uid"], "")
+        self.assertEqual(skipped["prodqual_worker_uid"], "")
+        self.assertEqual(skipped["prodqual_worker_gid"], "")
+        self.assertEqual(skipped["prodqual_operator_uid"], "")
+        skipped_errors = _full_policy_from_discovered_facts(skipped)
+        self.assertIn("authority_uid is required", skipped_errors)
+        self.assertIn("worker_uid is required", skipped_errors)
+        self.assertIn("operator_uid is required", skipped_errors)
+        with self.assertRaises(ValueError):
+            int(skipped["prodqual_worker_gid"])
+
+        malformed = _facts_from_discovery_stdout(
+            {
+                "Discover authority UniqueID": "UniqueID: not-an-id",
+                "Discover worker UniqueID": "UniqueID: also-bad",
+                "Discover worker PrimaryGroupID": "PrimaryGroupID: nope",
+                "Discover operator UniqueID": "operator",
+            }
+        )
+        malformed_errors = _full_policy_from_discovered_facts(malformed)
+        self.assertTrue(any("authority_uid must be an integer" in item for item in malformed_errors))
+        self.assertTrue(any("worker_uid must be an integer" in item for item in malformed_errors))
+        self.assertTrue(any("operator_uid must be an integer" in item for item in malformed_errors))
+        with self.assertRaises(ValueError):
+            int(malformed["prodqual_worker_gid"])
+
+        failed = _facts_from_discovery_stdout(
+            {
+                "Discover authority UniqueID": None,
+                "Discover worker UniqueID": None,
+                "Discover worker PrimaryGroupID": None,
+                "Discover operator UniqueID": None,
+            }
+        )
+        failed_errors = _full_policy_from_discovered_facts(failed)
+        self.assertIn("authority_uid is required", failed_errors)
+        self.assertIn("worker_uid is required", failed_errors)
+        self.assertIn("operator_uid is required", failed_errors)
 
 
 if __name__ == "__main__":
