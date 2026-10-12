@@ -712,5 +712,82 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertTrue(any("approved" in item or "pending" in item for item in errors))
 
 
+MUTATION_TASK_FILES = (
+    "identity.yml",
+    "filesystem.yml",
+    "activate.yml",
+    "backup_execute.yml",
+    "restore_execute.yml",
+    "rollback_execute.yml",
+)
+EXECUTION_IDENTITY_KEYS = (
+    "ansible_effective_user_id",
+    "ansible_user_id",
+    "ansible_uid",
+)
+
+
+def _named_task(tasks, name):
+    matches = [item for item in tasks if isinstance(item, dict) and item.get("name") == name]
+    if len(matches) != 1:
+        raise AssertionError("expected exactly one task named %r, found %d" % (name, len(matches)))
+    return matches[0]
+
+
+class PrivilegedFactGatheringInvocationTests(unittest.TestCase):
+    def test_setup_for_privileged_facts_has_task_level_become(self):
+        play = load_yaml(PLAYBOOKS / "macos-prodqual-loopback.yml")[0]
+        self.assertIs(play.get("become"), False)
+        self.assertIs(play.get("gather_facts"), False)
+        setup = _named_task(play.get("pre_tasks") or [], "Gather facts only after apply authorization")
+        self.assertIn("ansible.builtin.setup", setup)
+        self.assertIs(setup.get("become"), True)
+        self.assertIn("prodqual_apply_authorized | bool", str(setup.get("when")))
+
+    def test_operator_uid_discovery_is_unprivileged_id_u(self):
+        identity = load_yaml(ROLE / "tasks" / "identity.yml")
+        discover = _named_task(identity, "Discover operator UniqueID")
+        command = discover.get("ansible.builtin.command") or {}
+        self.assertEqual(command.get("argv"), ["/usr/bin/id", "-u"])
+        self.assertNotIn("become", discover)
+        self.assertNotEqual(discover.get("become"), True)
+        preflight = load_yaml(ROLE / "tasks" / "preflight.yml")
+        live_block = None
+        for item in preflight:
+            if isinstance(item, dict) and item.get("name") == "Live OS preflight (skipped offline)":
+                live_block = item.get("block") or []
+                break
+        self.assertIsNotNone(live_block)
+        pre_discover = _named_task(live_block, "Discover operator UniqueID (read-only)")
+        pre_command = pre_discover.get("ansible.builtin.command") or {}
+        self.assertEqual(pre_command.get("argv"), ["/usr/bin/id", "-u"])
+        self.assertNotIn("become", pre_discover)
+
+    def test_no_cached_or_overridden_execution_identity(self):
+        play_path = PLAYBOOKS / "macos-prodqual-loopback.yml"
+        play_text = play_path.read_text(encoding="utf-8")
+        play = load_yaml(play_path)[0]
+        vars_ = play.get("vars") or {}
+        for key in EXECUTION_IDENTITY_KEYS:
+            self.assertNotIn(key, vars_)
+            self.assertNotIn("%s:" % key, play_text)
+            self.assertNotIn("-e %s" % key, play_text)
+            self.assertNotIn("%s | default" % key, play_text)
+        identity_text = (ROLE / "tasks" / "identity.yml").read_text(encoding="utf-8")
+        self.assertNotIn("set_fact:\n    ansible_effective_user_id", identity_text)
+        self.assertNotRegex(identity_text, r"ansible_effective_user_id\s*:")
+        self.assertIn("ansible_effective_user_id | int == 0", identity_text)
+
+    def test_play_remain_unprivileged_with_explicit_mutation_boundaries(self):
+        play = load_yaml(PLAYBOOKS / "macos-prodqual-loopback.yml")[0]
+        self.assertIs(play.get("become"), False)
+        setup = _named_task(play.get("pre_tasks") or [], "Gather facts only after apply authorization")
+        self.assertIs(setup.get("become"), True)
+        for rel in MUTATION_TASK_FILES:
+            text = (ROLE / "tasks" / rel).read_text(encoding="utf-8")
+            self.assertIn("become: true", text, msg=rel)
+            self.assertIn("ansible_effective_user_id | int == 0", text, msg=rel)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

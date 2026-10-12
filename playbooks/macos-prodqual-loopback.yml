@@ -30,6 +30,7 @@
       tags: [always]
 
     - name: Gather facts only after apply authorization
+      become: true
       ansible.builtin.setup:
       when: prodqual_apply_authorized | bool
       tags: [always]
