@@ -1,0 +1,10 @@
+---
+noesis_codebase_state_activate: false
+noesis_codebase_state_user: elvis
+noesis_codebase_state_timezone: America/Denver
+noesis_codebase_state_hour: 2
+noesis_codebase_state_minute: 30
+noesis_codebase_state_repo: /Users/elvis/projects/noesis-agent-stack
+noesis_codebase_state_dir: /Users/elvis/.local/share/noesis/codebase-state
+noesis_codebase_state_log: /Users/elvis/.local/log/noesis-codebase-state.log
+---

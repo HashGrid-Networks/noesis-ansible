@@ -1,0 +1,46 @@
+---
+- name: Refuse unapproved codebase-state schedule activation
+  ansible.builtin.assert:
+    that:
+      - noesis_codebase_state_activate | bool
+    fail_msg: >-
+      noesis_codebase_state is review-only. Activation requires
+      noesis_codebase_state_activate=true after a separate operator approval.
+      This role does not install a crontab unless that variable is set.
+
+- name: Install collector wrapper
+  ansible.builtin.copy:
+    src: "{{ noesis_codebase_state_repo }}/orchestration/codebase_state/run_ingest.sh"
+    dest: /Users/elvis/.local/bin/noesis-codebase-state
+    owner: "{{ noesis_codebase_state_user }}"
+    group: staff
+    mode: "0700"
+  when: noesis_codebase_state_activate | bool
+
+- name: Ensure state and log directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ noesis_codebase_state_user }}"
+    group: staff
+    mode: "0700"
+  loop:
+    - "{{ noesis_codebase_state_dir }}"
+    - /Users/elvis/.local/log
+  when: noesis_codebase_state_activate | bool
+
+- name: Install Denver crontab fragment
+  ansible.builtin.cron:
+    name: noesis-codebase-state
+    user: "{{ noesis_codebase_state_user }}"
+    minute: "{{ noesis_codebase_state_minute }}"
+    hour: "{{ noesis_codebase_state_hour }}"
+    job: >-
+      PATH=/usr/bin:/bin HOME=/Users/elvis
+      /bin/bash /Users/elvis/.local/bin/noesis-codebase-state run
+      --projects-root /Users/elvis/projects
+      --state-dir {{ noesis_codebase_state_dir }}
+      --max-runtime-s 900
+    state: present
+  when: noesis_codebase_state_activate | bool
+---
